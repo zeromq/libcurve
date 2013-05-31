@@ -22,7 +22,7 @@ DESCRIPTION
 Scope and Goals
 ~~~~~~~~~~~~~~~
 
-Clab is a space for experimental C classes that are not stable or used enough to go into CZMQ. CLab classes are intended to be useful (rather than demos or works of art) but are kept out of CZMQ to reduce its technical debt and API size.
+CLAB is a space for experimental C classes that are not stable or used enough to go into CZMQ. CLAB classes are intended to be useful (rather than demos or works of art) but are kept out of CZMQ to reduce its technical debt and API size.
 
 
 License
@@ -39,7 +39,7 @@ The proper way to submit patches is to clone this repository, make your changes,
 
 All classes are maintained by a single person, who is the responsible editor for that class and who is named in the header as such. This is usually the originator of the class. When several people collaborate on a class, one single person is always the lead maintainer and the one to blame when it breaks.
 
-The general rule is, if you contribute code to Clab you must be willing to maintain it as long as there are users of it. Code with no active maintainer will in general be deprecated and/or removed.
+The general rule is, if you contribute code to CLAB you must be willing to maintain it as long as there are users of it. Code with no active maintainer will in general be deprecated and/or removed.
 
 USING CLAB
 ----------
@@ -47,7 +47,7 @@ USING CLAB
 Building and Installing
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-Clab uses autotools for packaging. To build from git (all example commands are for Linux):
+CLAB uses autotools for packaging. To build from git (all example commands are for Linux):
 ----
     git clone git://github.com/zeromq/clab.git
     cd clab
@@ -60,7 +60,7 @@ Clab uses autotools for packaging. To build from git (all example commands are f
 
 You will need the pkg-config, libtool, and autoreconf packages. Set the LD_LIBRARY_PATH to /usr/local/libs unless you install elsewhere.
 
-After building, you can run the Clab selftests:
+After building, you can run the CLAB selftests:
 ----
     cd src
     ./clab_selftest
@@ -69,7 +69,7 @@ After building, you can run the Clab selftests:
 Linking with an Application
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Include `clab.h` in your application and link with Clab. Here is a typical gcc link command:
+Include `clab.h` in your application and link with CLAB. Here is a typical gcc link command:
 ----
     gcc -lclab -lzmq myapp.c -o myapp
 ----
@@ -83,4 +83,4 @@ You should read `clab.h`. This file includes `zmq.h` and the system header files
 Technical Design
 ~~~~~~~~~~~~~~~~
 
-CLabs uses CZMQ's technical design (language style, class structure, portability rules.) 
+CLABs uses CZMQ's technical design (language style, class structure, portability rules.) 
