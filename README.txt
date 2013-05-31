@@ -1,25 +1,25 @@
 .set GIT=https://github.com/imatix/clab
 .sub 0MQ=ØMQ
 
-# CLab - experimental C classes
+# CLAB - experimental C classes
 
-CLab (libclab) is an experimental space for classes that are interesting but not yet useful. Classes that prove themselves useful are moved into the CZMQ library for general use. While CZMQ is generally "stable", CLab is generally "experimental".
+CLAB (libclab) is an experimental space that provides an incubator for CZMQ, the high-level C binding for 0MQ applications.  While CZMQ is generally "stable", CLAB is always "experimental". CLAB classes that prove useful may be moved into CZMQ. CLAB classes that prove useless may be deleted. The CLAB API is never considered stable and may change without notice.
 
 ## Ownership and License
 
-CLab's contributors are listed in the AUTHORS file. It is held by the ZeroMQ organization at github.com. The authors of Clab grant you use of this software under the terms of the GNU Lesser General Public License (LGPL). For details see the files `COPYING` and `COPYING.LESSER` in this directory.
+CLAB's contributors are listed in the AUTHORS file. It is held by the ZeroMQ organization at github.com. The authors of CLAB grant you use of this software under the terms of the GNU Lesser General Public License (LGPL). For details see the files `COPYING` and `COPYING.LESSER` in this directory.
 
 ## Contributing
 
-Clab uses the [C4.1 (Collective Code Construction Contract)](http://rfc.zeromq.org/spec:22) process for contributions.
+CLAB uses the [C4.1 (Collective Code Construction Contract)](http://rfc.zeromq.org/spec:22) process for contributions.
 
-Clab uses the [CLASS (C Language Style for Scalabilty)](http://rfc.zeromq.org/spec:21) guide for code style.
+CLAB uses the [CLASS (C Language Style for Scalabilty)](http://rfc.zeromq.org/spec:21) guide for code style.
 
-To report an issue, use the [Clab issue tracker]($(GIT)/issues) at github.com.
+To report an issue, use the [CLAB issue tracker]($(GIT)/issues) at github.com.
 
 ## Building and Installing
 
-Clab uses autotools for packaging. To build from git (all example commands are for Linux):
+CLAB uses autotools for packaging. To build from git (all example commands are for Linux):
 
     git clone git://github.com/imatix/clab.git
     cd clab
@@ -33,7 +33,7 @@ You will need the libtool and autotools packages. On FreeBSD, you may need to sp
 
     ./configure --with-libzmq=/usr/local
 
-After building, you can run the Clab selftests:
+After building, you can run the CLAB selftests:
 
     make check
 
