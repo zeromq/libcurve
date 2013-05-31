@@ -1,0 +1,241 @@
+cl_curve(3)
+===========
+
+NAME
+----
+cl_curve - CurveZMQ security engine (rfc.zeromq.org/spec:26)
+
+SYNOPSIS
+--------
+----
+//  Constructor; to create a client instance, pass the server public
+//  key. If you pass null, you create a server instance.
+CZMQ_EXPORT cl_curve_t *
+    cl_curve_new (byte *server_key);
+    
+//  Destructor
+CZMQ_EXPORT void
+    cl_curve_destroy (cl_curve_t **self_p);
+
+//  Long-term key management for servers; generate a new key pair
+CZMQ_EXPORT void
+    cl_curve_keypair_new (cl_curve_t *self);
+
+//  Save long-term key pair to disk; not confidential
+CZMQ_EXPORT int
+    cl_curve_keypair_save (cl_curve_t *self);
+
+//  Load long-term key pair from disk
+CZMQ_EXPORT int
+    cl_curve_keypair_load (cl_curve_t *self);
+
+//  Return public part of key pair
+CZMQ_EXPORT byte *
+    cl_curve_keypair_public (cl_curve_t *self);
+    
+//  Set a metadata property; these are sent to the peer after the
+//  security handshake. Property values are strings.
+CZMQ_EXPORT void
+    cl_curve_set_metadata (cl_curve_t *self, char *name, char *value);
+
+//  Set tracing on cl_curve instance. Will report activity to stdout.
+CZMQ_EXPORT void
+    cl_curve_set_verbose (cl_curve_t *self, bool verbose);
+
+//  Accept input command from peer. If the command is invalid, it is
+//  discarded silently. May return a blob to send to the peer, or NULL
+//  if there is nothing to send.
+CZMQ_EXPORT zframe_t *
+    cl_curve_execute (cl_curve_t *self, zframe_t *input);
+
+//  Encode clear-text message to peer. Returns a blob ready to send
+//  on the wire.
+CZMQ_EXPORT zframe_t *
+    cl_curve_encode (cl_curve_t *self, zframe_t **cleartext_p);
+
+//  Decode blob into message from peer. Takes ownership of encrypted frame.
+
+CZMQ_EXPORT zframe_t *
+    cl_curve_decode (cl_curve_t *self, zframe_t **encrypted_p);
+
+//  Indicate whether handshake is still in progress
+CZMQ_EXPORT bool
+    cl_curve_connected (cl_curve_t *self);
+
+//  Self test of this class
+void
+    cl_curve_test (bool verbose);
+----
+
+DESCRIPTION
+-----------
+
+CurveZMQ security engine, for use in ZeroMQ applications.
+This is a reference implementation of CurveZMQ, and can be used at the
+application level to secure a request-reply dialog (usually, DEALER to
+ROUTER). For an example of use, see the selftest function. To compile
+with security enabled, first build and install libsodium from GitHub at
+https://github.com/jedisct1/libsodium. Run ./configure after installing
+libsodium. If configure does not find libsodium, this class will work
+in clear text.
+
+This class does no I/O; all socket input/output is done by the caller
+which passes frames to and from this class. It still lacks support for
+multipart messages, for client authentication (will be done using the
+rfc.zeromq.org/spec:27/ZAP protocol), and proper error handling.
+
+EXAMPLE
+-------
+.From cl_curve_test method
+----
+void *
+server_task (void *args)
+{
+    zctx_t *ctx = zctx_new ();
+    assert (ctx);
+    void *router = zsocket_new (ctx, ZMQ_ROUTER);
+    int rc = zsocket_bind (router, "tcp://*:9000");
+    assert (rc != -1);
+
+    //  Create a new server instance and load its keys from the previously 
+    //  generated keypair file
+    cl_curve_t *server = cl_curve_new (NULL);
+    rc = cl_curve_keypair_load (server);
+    assert (rc == 0);
+
+    //  Set some metadata properties
+    cl_curve_set_metadata (server, "Server", "CLAB/cl_curve");
+    
+    //  A hack to get the thread to timeout and exit so we can test
+    //  under Valgrind. Do NOT do this on real servers!
+    zsocket_set_rcvtimeo (router, 1000);
+
+    //  Execute incoming frames until ready or exception
+    //  In practice we'd want a server instance per unique client
+    while (!cl_curve_connected (server)) {
+        zframe_t *sender = zframe_recv (router);
+        zframe_t *input = zframe_recv (router);
+        assert (input);
+        zframe_t *output = cl_curve_execute (server, input);
+        zframe_destroy (&input);
+        zframe_send (&sender, router, ZFRAME_MORE);
+        zframe_send (&output, router, 0);
+    }
+    while (true) {
+        //  Now act as echo service doing a full decode and encode
+        //  Finish when we get an END message
+        zframe_t *sender = zframe_recv (router);
+        if (!sender)
+            break;          //  Timed-out, finished
+        zframe_t *encrypted = zframe_recv (router);
+        assert (encrypted);
+        zframe_t *cleartext = cl_curve_decode (server, &encrypted);
+        assert (cleartext);
+        
+        encrypted = cl_curve_encode (server, &cleartext);
+        assert (encrypted);
+        zframe_send (&sender, router, ZFRAME_MORE);
+        zframe_send (&encrypted, router, 0);
+    }
+    cl_curve_destroy (&server);
+    zctx_destroy (&ctx);
+    return NULL;
+}
+    //  Generate new long-term key pair for our test server
+    //  The key pair will be stored in "secret.key"
+    
+    cl_curve_t *keygen = cl_curve_new (NULL);
+    cl_curve_keypair_new (keygen);
+    int rc = cl_curve_keypair_save (keygen);
+    assert (rc == 0);
+    assert (zfile_exists ("secret.key"));
+    
+    //  This is how we "share" the server key in our test
+    byte server_key [32];
+    memcpy (server_key, cl_curve_keypair_public (keygen), 32);
+    cl_curve_destroy (&keygen);
+    
+    //  We'll run the server as a background task, and the
+    //  client in this foreground thread.
+    zthread_new (server_task, NULL);
+
+    zctx_t *ctx = zctx_new ();
+    assert (ctx);
+    void *dealer = zsocket_new (ctx, ZMQ_DEALER);
+    rc = zsocket_connect (dealer, "tcp://127.0.0.1:9000");
+    assert (rc != -1);
+    
+    //  Create a new client instance using shared server key
+    cl_curve_t *client = cl_curve_new (server_key);
+    cl_curve_set_verbose (client, verbose);
+    cl_curve_keypair_new (client);
+
+    //  Set some metadata properties
+    cl_curve_set_metadata (client, "Client", "CLAB/cl_curve");
+    cl_curve_set_metadata (client, "Identity", "E475DA11");
+    
+    //  Execute null event on client to kick off handshake
+    zframe_t *output = cl_curve_execute (client, NULL);
+    while (!cl_curve_connected (client)) {
+        rc = zframe_send (&output, dealer, 0);
+        assert (rc >= 0);
+        zframe_t *input = zframe_recv (dealer);
+        assert (input);
+        output = cl_curve_execute (client, input);
+        zframe_destroy (&input);
+    }
+    //  Handshake is done, now try Hello, World
+    zframe_t *cleartext = zframe_new ((byte *) "Hello, World", 12);
+    zframe_t *encrypted = cl_curve_encode (client, &cleartext);
+    assert (encrypted);
+    zframe_send (&encrypted, dealer, 0);
+
+    encrypted = zframe_recv (dealer);
+    assert (encrypted);
+    
+    cleartext = cl_curve_decode (client, &encrypted);
+    assert (cleartext);
+    assert (zframe_size (cleartext) == 12);
+    assert (memcmp (zframe_data (cleartext), "Hello, World", 12) == 0);
+    zframe_destroy (&cleartext);
+    
+    //  Now send messages of increasing size, check they work
+    int count;
+    int size = 0;
+    for (count = 0; count < 18; count++) {
+        if (verbose)
+            printf ("Testing message of size=%d...\n", size);
+        cleartext = zframe_new (NULL, size);
+        int byte_nbr;
+        //  Set data to sequence 0...255 repeated
+        for (byte_nbr = 0; byte_nbr < size; byte_nbr++) 
+            zframe_data (cleartext)[byte_nbr] = (byte) byte_nbr;
+
+        encrypted = cl_curve_encode (client, &cleartext);
+        assert (encrypted);
+        zframe_send (&encrypted, dealer, 0);
+        
+        encrypted = zframe_recv (dealer);
+        assert (encrypted);
+        cleartext = cl_curve_decode (client, &encrypted);
+        assert (cleartext);
+        assert (zframe_size (cleartext) == size);
+        for (byte_nbr = 0; byte_nbr < size; byte_nbr++) {
+            assert (zframe_data (cleartext)[byte_nbr] == (byte) byte_nbr);
+        }
+        zframe_destroy (&cleartext);
+        size = size * 2 + 1;
+    }
+    //  Give server thread a chance to time-out and exit
+    zclock_sleep (1000);
+
+    //  Done, clean-up
+    zfile_delete ("public.key");
+    zfile_delete ("secret.key");
+    cl_curve_destroy (&client);
+    zctx_destroy (&ctx);
+----
+
+SEE ALSO
+--------
+linkczmq:czmq[7]

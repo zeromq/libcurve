@@ -1,0 +1,7 @@
+#  Run selftests and check memory
+echo "Rebuilding CLab..."
+gcc -g -o clab_selftest clab_selftest.c z*.c ${CFLAGS} ${LDFLAGS} -lzmq -lczmq -lsodium -lpthread
+if [ $? -eq 0 ]; then
+    echo "Starting Valgrind memcheck..."
+    valgrind --tool=memcheck --leak-check=full --suppressions=valgrind.supp ./clab_selftest
+fi
