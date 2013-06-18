@@ -1,5 +1,5 @@
 MAN1 =
-MAN3 = curvezmq_codec.3 
+MAN3 = curvezmq_codec.3 curvezmq_keypair.3
 MAN7 = curvezmq.7
 MAN_DOC = $(MAN1) $(MAN3) $(MAN7)
 

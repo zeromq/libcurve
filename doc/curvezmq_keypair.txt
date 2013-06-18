@@ -1,0 +1,65 @@
+curvezmq_keypair(3)
+===================
+
+NAME
+----
+curvezmq_keypair - keypair management
+
+SYNOPSIS
+--------
+----
+//  Constructor, creates a new public/secret key pair
+CZMQ_EXPORT curvezmq_keypair_t *
+    curvezmq_keypair_new (void);
+    
+//  Destructor
+CZMQ_EXPORT void
+    curvezmq_keypair_destroy (curvezmq_keypair_t **self_p);
+
+//  Save key pair to disk
+CZMQ_EXPORT int
+    curvezmq_keypair_save (curvezmq_keypair_t *self);
+
+//  Constructor, load key pair from disk
+CZMQ_EXPORT curvezmq_keypair_t *
+    curvezmq_keypair_load (void);
+
+//  Return public part of key pair
+CZMQ_EXPORT byte *
+    curvezmq_keypair_public (curvezmq_keypair_t *self);
+    
+//  Return secret part of key pair
+CZMQ_EXPORT byte *
+    curvezmq_keypair_secret (curvezmq_keypair_t *self);
+    
+//  Self test of this class
+void
+    curvezmq_keypair_test (bool verbose);
+----
+
+DESCRIPTION
+-----------
+
+
+
+EXAMPLE
+-------
+.From curvezmq_keypair_test method
+----
+    //  Generate new long-term key pair for our test server
+    //  The key pair will be stored in "secret.key"
+    curvezmq_keypair_t *keypair = curvezmq_keypair_new ();
+    int rc = curvezmq_keypair_save (keypair);
+    assert (rc == 0);
+    assert (zfile_exists ("secret.key"));
+    assert (curvezmq_keypair_secret (keypair));
+    assert (curvezmq_keypair_public (keypair));
+    curvezmq_keypair_destroy (&keypair);
+    //  Done, clean-up
+    zfile_delete ("public.key");
+    zfile_delete ("secret.key");
+----
+
+SEE ALSO
+--------
+linkczmq:czmq[7]
