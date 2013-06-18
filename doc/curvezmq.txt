@@ -1,18 +1,18 @@
-clab(7)
-=======
+curvezmq(7)
+===========
 
 
 NAME
 ----
-clab - Experimental C classes
+CurveZMQ - an authentication and encryption library for ZeroMQ.
 
 
 SYNOPSIS
 --------
 ----
-#include <clab.h>
+#include <curvezmq.h>
 
-cc ['flags'] 'files' -lzmq -lczmq -lclab ['libraries']
+cc ['flags'] 'files' -lzmq -lczmq -lcurvezmq ['libraries']
 ----
 
 
@@ -22,35 +22,34 @@ DESCRIPTION
 Scope and Goals
 ~~~~~~~~~~~~~~~
 
-CLAB is a space for experimental C classes that are not stable or used enough to go into CZMQ. CLAB classes are intended to be useful (rather than demos or works of art) but are kept out of CZMQ to reduce its technical debt and API size.
-
+CurveZMQ implements the rfc.zeromq.org/spec:26 elliptic curve security mechanism and makes it easy to use in ZeroMQ applications.
 
 License
 ~~~~~~~
 
-The authors of CLAB (see AUTHORS file) grant you free use of this software under the terms of the GNU Lesser General Public License (LGPL). For details see the files `COPYING` and `COPYING.LESSER` in this directory.
+The authors of CurveZMQ (see AUTHORS file) grant you free use of this software under the terms of the GNU Lesser General Public License (LGPL). For details see the files `COPYING` and `COPYING.LESSER` in this directory.
 
 Contributing
 ~~~~~~~~~~~~
 
-To submit an issue use the issue tracker at http://github.com/imatix/clab/issues. All discussion happens on the zeromq-dev list or #zeromq IRC channel at irc.freenode.net.
+To submit an issue use the issue tracker at http://github.com/imatix/curvezmq/issues. All discussion happens on the zeromq-dev list or #zeromq IRC channel at irc.freenode.net.
 
 The proper way to submit patches is to clone this repository, make your changes, and use git to create a patch or a pull request. See http://www.zeromq.org/docs:contributing. All contributors are listed in AUTHORS.
 
 All classes are maintained by a single person, who is the responsible editor for that class and who is named in the header as such. This is usually the originator of the class. When several people collaborate on a class, one single person is always the lead maintainer and the one to blame when it breaks.
 
-The general rule is, if you contribute code to CLAB you must be willing to maintain it as long as there are users of it. Code with no active maintainer will in general be deprecated and/or removed.
+The general rule is, if you contribute code to CurveZMQ you must be willing to maintain it as long as there are users of it. Code with no active maintainer will in general be deprecated and/or removed.
 
-USING CLAB
-----------
+USING CurveZMQ
+--------------
 
 Building and Installing
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-CLAB uses autotools for packaging. To build from git (all example commands are for Linux):
+CurveZMQ uses autotools for packaging. To build from git (all example commands are for Linux):
 ----
-    git clone git://github.com/zeromq/clab.git
-    cd clab
+    git clone git://github.com/zeromq/curvezmq.git
+    cd curvezmq
     sh autogen.sh
     ./configure
     make all
@@ -60,27 +59,27 @@ CLAB uses autotools for packaging. To build from git (all example commands are f
 
 You will need the pkg-config, libtool, and autoreconf packages. Set the LD_LIBRARY_PATH to /usr/local/libs unless you install elsewhere.
 
-After building, you can run the CLAB selftests:
+After building, you can run the CurveZMQ selftests:
 ----
     cd src
-    ./clab_selftest
+    ./curvezmq_selftest
 ----
 
 Linking with an Application
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Include `clab.h` in your application and link with CLAB. Here is a typical gcc link command:
+Include `curvezmq.h` in your application and link with CurveZMQ. Here is a typical gcc link command:
 ----
-    gcc -lclab -lzmq myapp.c -o myapp
+    gcc -lcurvezmq -lzmq myapp.c -o myapp
 ----
 
-You should read `clab.h`. This file includes `zmq.h` and the system header files that typical ØMQ applications will need. The provided 'c' shell script lets you write simple portable build scripts:
+You should read `curvezmq.h`. This file includes `zmq.h` and the system header files that typical ØMQ applications will need. The provided 'c' shell script lets you write simple portable build scripts:
 ----
-    c -lclab -lzmq -l myapp
+    c -lcurvezmq -lzmq -l myapp
 ----
 
 
 Technical Design
 ~~~~~~~~~~~~~~~~
 
-CLABs uses CZMQ's technical design (language style, class structure, portability rules.) 
+CurveZMQs uses CZMQ's technical design (language style, class structure, portability rules.) 

@@ -1,11 +1,11 @@
 /*  =========================================================================
-    cl_curve - CurveZMQ security engine (rfc.zeromq.org/spec:26)
+    curvezmq_codec - core engine (rfc.zeromq.org/spec:26)
 
     -------------------------------------------------------------------------
     Copyright (c) 1991-2013 iMatix Corporation <www.imatix.com>
     Copyright other contributors as noted in the AUTHORS file.
 
-    This file is part of CLAB, the space for experimental C classes.
+    This file is part of the CurveZMQ authentication and encryption library.
 
     This is free software; you can redistribute it and/or modify it under
     the terms of the GNU Lesser General Public License as published by the 
@@ -40,7 +40,7 @@
 @end
 */
 
-#include "../include/clab.h"
+#include "../include/curvezmq.h"
 #if !defined (__WINDOWS__)
 #   include "platform.h"
 #endif
@@ -68,10 +68,9 @@ typedef enum {
 
 
 //  Structure of our class
-struct _cl_curve_t {
-    //  Long term keys, if known
-    byte public_key [32];       //  Our long-term public key
-    byte secret_key [32];       //  Our long-term secret key
+struct _curvezmq_codec_t {
+    //  Long term public and secret keys, if known
+    curvezmq_keypair_t *keypair;
 
     //  Server connection properties
     byte cookie_key [32];       //  Server cookie key
@@ -135,14 +134,15 @@ typedef struct {
 
 
 //  --------------------------------------------------------------------------
-//  Create a new cl_curve instance; if you provide a server-key, is a client
-//  that can talk to that specific server. Otherwise is a server that will
-//  talk to one specific client.
+//  Constructor
+//  Create a new curvezmq_codec instance; if you provide a server-key, is a 
+//  client that can talk to that specific server. Otherwise is a server that 
+//  will talk to one specific client.
 
-cl_curve_t *
-cl_curve_new (byte *server_key)
+curvezmq_codec_t *
+curvezmq_codec_new (byte *server_key)
 {
-    cl_curve_t *self = (cl_curve_t *) zmalloc (sizeof (cl_curve_t));
+    curvezmq_codec_t *self = (curvezmq_codec_t *) zmalloc (sizeof (curvezmq_codec_t));
     assert (self);
     if (server_key) {
         memcpy (self->server_key, server_key, 32);
@@ -161,11 +161,12 @@ cl_curve_new (byte *server_key)
 //  Destructor
 
 void
-cl_curve_destroy (cl_curve_t **self_p)
+curvezmq_codec_destroy (curvezmq_codec_t **self_p)
 {
     assert (self_p);
     if (*self_p) {
-        cl_curve_t *self = *self_p;
+        curvezmq_codec_t *self = *self_p;
+        curvezmq_keypair_destroy (&self->keypair);
         free (self);
         *self_p = NULL;
     }
@@ -173,104 +174,13 @@ cl_curve_destroy (cl_curve_t **self_p)
 
 
 //  --------------------------------------------------------------------------
-//  Generate a new long-term key pair
-
+//  Set long term keys for this codec; takes ownership of keypair and
+//  destroys when destroying the codec.
 void
-cl_curve_keypair_new (cl_curve_t *self)
+curvezmq_codec_keypair_set (curvezmq_codec_t *self, curvezmq_keypair_t *keypair)
 {
     assert (self);
-#if defined (HAVE_LIBSODIUM)
-    int rc = crypto_box_keypair (self->public_key, self->secret_key);
-    assert (rc == 0);
-#endif
-}
-
-
-//  Return allocated string containing key in printable hex format
-
-char *s_key_to_hex (byte *key)
-{
-    char *hex = zmalloc (65);
-    int byte_nbr;
-    for (byte_nbr = 0; byte_nbr < 32; byte_nbr++) 
-        sprintf (hex + (byte_nbr * 2), "%02X", key [byte_nbr]);
-    return hex;
-}
-
-
-//  --------------------------------------------------------------------------
-//  Save long-term key pair to disk; not confidential
-
-int
-cl_curve_keypair_save (cl_curve_t *self)
-{
-    assert (self);
-
-    //  Get printable key strings
-    char *public_key = s_key_to_hex (self->public_key);
-    char *secret_key = s_key_to_hex (self->secret_key);
-    
-    //  Set process file create mask to owner access only
-    zfile_mode_private ();
-    
-    //  The public key file contains just the public key
-    zconfig_t *root = zconfig_new ("root", NULL);
-    zconfig_t *key = zconfig_new ("public-key", root);
-    zconfig_set_value (key, public_key);
-    zconfig_save (root, "public.key");
-    
-    //  The secret key file contains both secret and public keys
-    key = zconfig_new ("secret-key", root);
-    zconfig_set_value (key, secret_key);
-    zconfig_save (root, "secret.key");
-    zconfig_destroy (&root);
-    
-    //  Reset process file create mask
-    zfile_mode_default ();
-    
-    free (public_key);
-    free (secret_key);
-    return 0;
-}
-
-
-//  --------------------------------------------------------------------------
-//  Load long-term key pair from disk; returns 0 if OK, -1 if error
-
-int
-cl_curve_keypair_load (cl_curve_t *self)
-{
-    assert (self);
-    zconfig_t *root = zconfig_load ("secret.key");
-    assert (root);
-    int rc = 0;
-    char *secret_key = zconfig_resolve (root, "secret-key", NULL);
-    char *public_key = zconfig_resolve (root, "public-key", NULL);
-    if (secret_key && public_key) {
-        int byte_nbr, matches = 0;
-        for (byte_nbr = 0; byte_nbr < 32; byte_nbr++) {
-            matches += sscanf (secret_key + byte_nbr * 2, "%02hhX ", &self->secret_key [byte_nbr]);
-            matches += sscanf (public_key + byte_nbr * 2, "%02hhX ", &self->public_key [byte_nbr]);
-        }
-        //  TODO: don't assert, but raise error exception
-        assert (matches == 64);
-    }
-    else
-        rc = -1;
-
-    zconfig_destroy (&root);
-    return rc;
-}
-
-
-//  --------------------------------------------------------------------------
-//  Return public part of key pair
-
-byte *
-cl_curve_keypair_public (cl_curve_t *self)
-{
-    assert (self);
-    return self->public_key;
+    self->keypair = keypair;
 }
 
 
@@ -279,7 +189,7 @@ cl_curve_keypair_public (cl_curve_t *self)
 //  handshake. Property values are strings.
 
 void
-cl_curve_set_metadata (cl_curve_t *self, char *name, char *value)
+curvezmq_codec_set_metadata (curvezmq_codec_t *self, char *name, char *value)
 {
     assert (self);
     assert (name && value);
@@ -307,10 +217,10 @@ cl_curve_set_metadata (cl_curve_t *self, char *name, char *value)
 
 
 //  --------------------------------------------------------------------------
-//  Set tracing on cl_curve instance. Will report activity to stdout.
+//  Set tracing on curvezmq_codec instance. Will report activity to stdout.
 
 void
-cl_curve_set_verbose (cl_curve_t *self, bool verbose)
+curvezmq_codec_set_verbose (curvezmq_codec_t *self, bool verbose)
 {
     assert (self);
     self->verbose = verbose;
@@ -325,7 +235,7 @@ cl_curve_set_verbose (cl_curve_t *self, bool verbose)
     
 static void
 s_encrypt (
-    cl_curve_t *self,         //  cl_curve instance sending the data
+    curvezmq_codec_t *self,         //  curvezmq_codec instance sending the data
     byte *target,           //  target must be nonce + box
     byte *data,             //  Clear text data to encrypt
     size_t size,            //  Size of clear text data
@@ -383,7 +293,7 @@ s_encrypt (
     
 static void
 s_decrypt (
-    cl_curve_t *self,         //  cl_curve instance sending the data
+    curvezmq_codec_t *self,         //  curvezmq_codec instance sending the data
     byte *source,           //  source must be nonce + box
     byte *data,             //  Where to store decrypted clear text
     size_t size,            //  Size of clear text data
@@ -432,7 +342,7 @@ s_decrypt (
 }
 
 static zframe_t *
-s_produce_hello (cl_curve_t *self)
+s_produce_hello (curvezmq_codec_t *self)
 {
     zframe_t *command = zframe_new (NULL, sizeof (hello_t));
     hello_t *hello = (hello_t *) zframe_data (command);
@@ -453,7 +363,7 @@ s_produce_hello (cl_curve_t *self)
 }
 
 static void
-s_process_hello (cl_curve_t *self, zframe_t *input)
+s_process_hello (curvezmq_codec_t *self, zframe_t *input)
 {
     if (self->verbose)
         printf ("\nC:HELLO: ");
@@ -464,13 +374,13 @@ s_process_hello (cl_curve_t *self, zframe_t *input)
     s_decrypt (self, hello->nonce, 
                signature, 64, 
                "CurveZMQHELLO---", 
-               hello->client, self->secret_key);
+               hello->client, curvezmq_keypair_secret (self->keypair));
     if (self->verbose)
         puts ("OK");
 }
 
 static zframe_t *
-s_produce_welcome (cl_curve_t *self)
+s_produce_welcome (curvezmq_codec_t *self)
 {
     zframe_t *command = zframe_new (NULL, sizeof (welcome_t));
     welcome_t *welcome = (welcome_t *) zframe_data (command);
@@ -510,13 +420,13 @@ s_produce_welcome (cl_curve_t *self)
     memcpy (plain + 48, cookie_box + crypto_box_BOXZEROBYTES, 80);
     s_encrypt (self, welcome->nonce, 
                plain, 128, "WELCOME-", 
-               self->cn_client, self->secret_key);
+               self->cn_client, curvezmq_keypair_secret (self->keypair));
 #endif
     return command;
 }
 
 static void
-s_process_welcome (cl_curve_t *self, zframe_t *input)
+s_process_welcome (curvezmq_codec_t *self, zframe_t *input)
 {
     if (self->verbose)
         printf ("S:WELCOME: ");
@@ -540,7 +450,7 @@ s_process_welcome (cl_curve_t *self, zframe_t *input)
 }
 
 static zframe_t *
-s_produce_initiate (cl_curve_t *self)
+s_produce_initiate (curvezmq_codec_t *self)
 {
     zframe_t *command = zframe_new (NULL, sizeof (initiate_t) + self->metadata_size);
     initiate_t *initiate = (initiate_t *) zframe_data (command);
@@ -552,7 +462,7 @@ s_produce_initiate (cl_curve_t *self)
     byte vouch [64];
     s_encrypt (self, vouch, 
                self->cn_public, 32, "VOUCH---", 
-               self->server_key, self->secret_key);
+               self->server_key, curvezmq_keypair_secret (self->keypair));
     
     //  Working variables for crypto calls
     size_t box_size = 96 + self->metadata_size;
@@ -560,7 +470,7 @@ s_produce_initiate (cl_curve_t *self)
     byte *box = malloc (box_size);
 
     //  Create Box [C + vouch + metadata](C'->S')
-    memcpy (plain, self->public_key, 32);
+    memcpy (plain, curvezmq_keypair_public (self->keypair), 32);
     memcpy (plain + 32, vouch, 64);
     memcpy (plain + 96, self->metadata, self->metadata_size);
     s_encrypt (self, initiate->nonce, 
@@ -574,7 +484,7 @@ s_produce_initiate (cl_curve_t *self)
 }
 
 static void
-s_process_initiate (cl_curve_t *self, zframe_t *input)
+s_process_initiate (curvezmq_codec_t *self, zframe_t *input)
 {
     if (self->verbose)
         printf ("C:INITIATE: ");
@@ -624,7 +534,7 @@ s_process_initiate (cl_curve_t *self, zframe_t *input)
     memcpy (vouch, plain + 32, 64);
     s_decrypt (self, vouch, 
                plain, 32, "VOUCH---",
-               self->client_key, self->secret_key);
+               self->client_key, curvezmq_keypair_secret (self->keypair));
     
     //  What we decrypted must be the short term client public key
     //  TODO: don't assert, but raise error on connection
@@ -642,7 +552,7 @@ s_process_initiate (cl_curve_t *self, zframe_t *input)
 }
 
 static zframe_t *
-s_produce_ready (cl_curve_t *self)
+s_produce_ready (curvezmq_codec_t *self)
 {
     zframe_t *command = zframe_new (NULL, sizeof (ready_t) + self->metadata_size);
     ready_t *ready = (ready_t *) zframe_data (command);
@@ -655,7 +565,7 @@ s_produce_ready (cl_curve_t *self)
 }
 
 static void
-s_process_ready (cl_curve_t *self, zframe_t *input)
+s_process_ready (curvezmq_codec_t *self, zframe_t *input)
 {
     ready_t *ready = (ready_t *) zframe_data (input);
     if (self->verbose)
@@ -670,7 +580,7 @@ s_process_ready (cl_curve_t *self, zframe_t *input)
 }
 
 static zframe_t *
-s_produce_message (cl_curve_t *self, zframe_t *clear)
+s_produce_message (curvezmq_codec_t *self, zframe_t *clear)
 {
     zframe_t *command = zframe_new (NULL, sizeof (message_t) + zframe_size (clear));
     message_t *message = (message_t *) zframe_data (command);
@@ -683,7 +593,7 @@ s_produce_message (cl_curve_t *self, zframe_t *clear)
 }
 
 static zframe_t *
-s_process_message (cl_curve_t *self, zframe_t *input)
+s_process_message (curvezmq_codec_t *self, zframe_t *input)
 {
     message_t *message = (message_t *) zframe_data (input);
     if (self->verbose)
@@ -707,7 +617,7 @@ s_process_message (cl_curve_t *self, zframe_t *input)
 //  if there is nothing to send.
 
 zframe_t *
-cl_curve_execute (cl_curve_t *self, zframe_t *input)
+curvezmq_codec_execute (curvezmq_codec_t *self, zframe_t *input)
 {
     assert (self);
     
@@ -766,7 +676,7 @@ cl_curve_execute (cl_curve_t *self, zframe_t *input)
 //  on the wire. Takes ownership of clear-text frame.
 
 zframe_t *
-cl_curve_encode (cl_curve_t *self, zframe_t **cleartext_p)
+curvezmq_codec_encode (curvezmq_codec_t *self, zframe_t **cleartext_p)
 {
     assert (self);
     assert (self->state == connected);
@@ -783,7 +693,7 @@ cl_curve_encode (cl_curve_t *self, zframe_t **cleartext_p)
 //  Decode blob into message from peer. Takes ownership of encrypted frame.
 
 zframe_t *
-cl_curve_decode (cl_curve_t *self, zframe_t **encrypted_p)
+curvezmq_codec_decode (curvezmq_codec_t *self, zframe_t **encrypted_p)
 {
     assert (self);
     assert (self->state == connected);
@@ -807,7 +717,7 @@ cl_curve_decode (cl_curve_t *self, zframe_t **encrypted_p)
 //  Indicate whether handshake is still in progress
 
 bool
-cl_curve_connected (cl_curve_t *self)
+curvezmq_codec_connected (curvezmq_codec_t *self)
 {
     assert (self);
     return (self->state == connected);
@@ -829,12 +739,11 @@ server_task (void *args)
 
     //  Create a new server instance and load its keys from the previously 
     //  generated keypair file
-    cl_curve_t *server = cl_curve_new (NULL);
-    rc = cl_curve_keypair_load (server);
-    assert (rc == 0);
+    curvezmq_codec_t *server = curvezmq_codec_new (NULL);
+    curvezmq_codec_keypair_set (server, curvezmq_keypair_load ());
 
     //  Set some metadata properties
-    cl_curve_set_metadata (server, "Server", "CLAB/cl_curve");
+    curvezmq_codec_set_metadata (server, "Server", "CURVEZMQ/curvezmq_codec");
     
     //  A hack to get the thread to timeout and exit so we can test
     //  under Valgrind. Do NOT do this on real servers!
@@ -842,11 +751,11 @@ server_task (void *args)
 
     //  Execute incoming frames until ready or exception
     //  In practice we'd want a server instance per unique client
-    while (!cl_curve_connected (server)) {
+    while (!curvezmq_codec_connected (server)) {
         zframe_t *sender = zframe_recv (router);
         zframe_t *input = zframe_recv (router);
         assert (input);
-        zframe_t *output = cl_curve_execute (server, input);
+        zframe_t *output = curvezmq_codec_execute (server, input);
         zframe_destroy (&input);
         zframe_send (&sender, router, ZFRAME_MORE);
         zframe_send (&output, router, 0);
@@ -859,39 +768,37 @@ server_task (void *args)
             break;          //  Timed-out, finished
         zframe_t *encrypted = zframe_recv (router);
         assert (encrypted);
-        zframe_t *cleartext = cl_curve_decode (server, &encrypted);
+        zframe_t *cleartext = curvezmq_codec_decode (server, &encrypted);
         assert (cleartext);
         
-        encrypted = cl_curve_encode (server, &cleartext);
+        encrypted = curvezmq_codec_encode (server, &cleartext);
         assert (encrypted);
         zframe_send (&sender, router, ZFRAME_MORE);
         zframe_send (&encrypted, router, 0);
     }
-    cl_curve_destroy (&server);
+    curvezmq_codec_destroy (&server);
     zctx_destroy (&ctx);
     return NULL;
 }
 //  @end
 
 void
-cl_curve_test (bool verbose)
+curvezmq_codec_test (bool verbose)
 {
-    printf (" * cl_curve: ");
+    printf (" * curvezmq_codec: ");
 
     //  @selftest
     //  Generate new long-term key pair for our test server
     //  The key pair will be stored in "secret.key"
-    
-    cl_curve_t *keygen = cl_curve_new (NULL);
-    cl_curve_keypair_new (keygen);
-    int rc = cl_curve_keypair_save (keygen);
+    curvezmq_keypair_t *keypair = curvezmq_keypair_new ();
+    int rc = curvezmq_keypair_save (keypair);
     assert (rc == 0);
     assert (zfile_exists ("secret.key"));
     
     //  This is how we "share" the server key in our test
     byte server_key [32];
-    memcpy (server_key, cl_curve_keypair_public (keygen), 32);
-    cl_curve_destroy (&keygen);
+    memcpy (server_key, curvezmq_keypair_public (keypair), 32);
+    curvezmq_keypair_destroy (&keypair);
     
     //  We'll run the server as a background task, and the
     //  client in this foreground thread.
@@ -904,34 +811,34 @@ cl_curve_test (bool verbose)
     assert (rc != -1);
     
     //  Create a new client instance using shared server key
-    cl_curve_t *client = cl_curve_new (server_key);
-    cl_curve_set_verbose (client, verbose);
-    cl_curve_keypair_new (client);
+    curvezmq_codec_t *client = curvezmq_codec_new (server_key);
+    curvezmq_codec_set_verbose (client, verbose);
+    curvezmq_codec_keypair_set (client, curvezmq_keypair_new ());
 
     //  Set some metadata properties
-    cl_curve_set_metadata (client, "Client", "CLAB/cl_curve");
-    cl_curve_set_metadata (client, "Identity", "E475DA11");
+    curvezmq_codec_set_metadata (client, "Client", "CURVEZMQ/curvezmq_codec");
+    curvezmq_codec_set_metadata (client, "Identity", "E475DA11");
     
     //  Execute null event on client to kick off handshake
-    zframe_t *output = cl_curve_execute (client, NULL);
-    while (!cl_curve_connected (client)) {
+    zframe_t *output = curvezmq_codec_execute (client, NULL);
+    while (!curvezmq_codec_connected (client)) {
         rc = zframe_send (&output, dealer, 0);
         assert (rc >= 0);
         zframe_t *input = zframe_recv (dealer);
         assert (input);
-        output = cl_curve_execute (client, input);
+        output = curvezmq_codec_execute (client, input);
         zframe_destroy (&input);
     }
     //  Handshake is done, now try Hello, World
     zframe_t *cleartext = zframe_new ((byte *) "Hello, World", 12);
-    zframe_t *encrypted = cl_curve_encode (client, &cleartext);
+    zframe_t *encrypted = curvezmq_codec_encode (client, &cleartext);
     assert (encrypted);
     zframe_send (&encrypted, dealer, 0);
 
     encrypted = zframe_recv (dealer);
     assert (encrypted);
     
-    cleartext = cl_curve_decode (client, &encrypted);
+    cleartext = curvezmq_codec_decode (client, &encrypted);
     assert (cleartext);
     assert (zframe_size (cleartext) == 12);
     assert (memcmp (zframe_data (cleartext), "Hello, World", 12) == 0);
@@ -949,13 +856,13 @@ cl_curve_test (bool verbose)
         for (byte_nbr = 0; byte_nbr < size; byte_nbr++) 
             zframe_data (cleartext)[byte_nbr] = (byte) byte_nbr;
 
-        encrypted = cl_curve_encode (client, &cleartext);
+        encrypted = curvezmq_codec_encode (client, &cleartext);
         assert (encrypted);
         zframe_send (&encrypted, dealer, 0);
         
         encrypted = zframe_recv (dealer);
         assert (encrypted);
-        cleartext = cl_curve_decode (client, &encrypted);
+        cleartext = curvezmq_codec_decode (client, &encrypted);
         assert (cleartext);
         assert (zframe_size (cleartext) == size);
         for (byte_nbr = 0; byte_nbr < size; byte_nbr++) {
@@ -968,9 +875,9 @@ cl_curve_test (bool verbose)
     zclock_sleep (1000);
 
     //  Done, clean-up
+    curvezmq_codec_destroy (&client);
     zfile_delete ("public.key");
     zfile_delete ("secret.key");
-    cl_curve_destroy (&client);
     zctx_destroy (&ctx);
     //  @end
     
