@@ -2,11 +2,11 @@
 # Process this file with autoconf to produce a configure script.
 AC_PREREQ(2.61)
 #
-# The version number is extracted from include/clab.h using
+# The version number is extracted from include/curvezmq.h using
 # the version.sh script. Hence, it should be updated there.
 # The version in git should reflect the *next* version planned.
 #
-AC_INIT([clab],[m4_esyscmd([./version.sh clab])],[zeromq-dev@lists.zeromq.org])
+AC_INIT([curvezmq],[m4_esyscmd([./version.sh curvezmq])],[zeromq-dev@lists.zeromq.org])
 
 AC_CONFIG_AUX_DIR(config)
 AC_CONFIG_MACRO_DIR(config)
@@ -18,11 +18,11 @@ PV_MAJOR=`echo $PACKAGE_VERSION | cut -d . -f 1`
 PV_MINOR=`echo $PACKAGE_VERSION | cut -d . -f 2`
 PV_PATCH=`echo $PACKAGE_VERSION | cut -d . -f 3`
 AC_DEFINE_UNQUOTED([PACKAGE_VERSION_MAJOR],[$PV_MAJOR],
-    [CLAB major version])
+    [CURVEZMQ major version])
 AC_DEFINE_UNQUOTED([PACKAGE_VERSION_MINOR],[$PV_MINOR],
-    [CLAB minor version])
+    [CURVEZMQ minor version])
 AC_DEFINE_UNQUOTED([PACKAGE_VERSION_PATCH],[$PV_PATCH],
-    [CLAB patchlevel])
+    [CURVEZMQ patchlevel])
 # This lets us use PACKAGE_VERSION in Makefiles
 AC_SUBST(PACKAGE_VERSION)
 
@@ -33,12 +33,12 @@ AC_SUBST(PACKAGE_VERSION)
 # know exactly what you're doing and have read and understand
 # http://www.gnu.org/software/libtool/manual/html_node/Updating-version-info.html
 #
-# libclab -version-info
+# libcurvezmq -version-info
 LTVER="1:0:0"
 AC_SUBST(LTVER)
 
 # Capture c flags
-CLAB_ORIG_CFLAGS="${CFLAGS:-none}"
+CURVEZMQ_ORIG_CFLAGS="${CFLAGS:-none}"
 
 # Checks for programs
 AC_PROG_CC
@@ -56,13 +56,13 @@ AC_CHECK_LIB([sodium], [sodium_init])
 # Code coverage
 AC_ARG_WITH(gcov, [AS_HELP_STRING([--with-gcov=yes/no],
                   [With GCC Code Coverage reporting.])],
-                  [CLAB_GCOV="$withval"])
+                  [CURVEZMQ_GCOV="$withval"])
 
-if test "x${CLAB_GCOV}" == "xyes"; then
+if test "x${CURVEZMQ_GCOV}" == "xyes"; then
     CFLAGS="-O0 -g -fprofile-arcs -ftest-coverage"
 
-    if test "x${CLAB_ORIG_CFLAGS}" != "xnone"; then
-        CFLAGS="${CFLAGS} ${CLAB_ORIG_CFLAGS}"
+    if test "x${CURVEZMQ_ORIG_CFLAGS}" != "xnone"; then
+        CFLAGS="${CFLAGS} ${CURVEZMQ_ORIG_CFLAGS}"
     fi
 fi
 
@@ -70,10 +70,10 @@ fi
 AC_ARG_WITH([libzmq],
             [AS_HELP_STRING([--with-libzmq],
                             [Specify libzmq prefix])],
-            [clab_search_libzmq="yes"],
+            [curvezmq_search_libzmq="yes"],
             [])
 
-if test "x$clab_search_libzmq" = "xyes"; then
+if test "x$curvezmq_search_libzmq" = "xyes"; then
     if test -r "${with_libzmq}/include/zmq.h"; then
         CFLAGS="-I${with_libzmq}/include ${CFLAGS}"
         LDFLAGS="-L${with_libzmq}/lib ${LDFLAGS}"
@@ -117,34 +117,34 @@ AC_LINK_IFELSE([AC_LANG_PROGRAM([#include <czmq.h>],
                [AC_MSG_ERROR([no. Please specify libczmq installation prefix using --with-libczmq])])
 
 # Platform specific checks
-clab_on_mingw32="no"
-clab_on_android="no"
+curvezmq_on_mingw32="no"
+curvezmq_on_android="no"
 
 # Host speciffic checks
 AC_CANONICAL_HOST
 
 # Determine whether or not documentation should be built and installed.
-clab_build_doc="yes"
-clab_install_man="yes"
+curvezmq_build_doc="yes"
+curvezmq_install_man="yes"
 
 # Check for asciidoc and xmlto and don't build the docs if these are not installed.
-AC_CHECK_PROG(clab_have_asciidoc, asciidoc, yes, no)
-AC_CHECK_PROG(clab_have_xmlto, xmlto, yes, no)
-if test "x$clab_have_asciidoc" = "xno" -o "x$clab_have_xmlto" = "xno"; then
-    clab_build_doc="no"
+AC_CHECK_PROG(curvezmq_have_asciidoc, asciidoc, yes, no)
+AC_CHECK_PROG(curvezmq_have_xmlto, xmlto, yes, no)
+if test "x$curvezmq_have_asciidoc" = "xno" -o "x$curvezmq_have_xmlto" = "xno"; then
+    curvezmq_build_doc="no"
     # Tarballs built with 'make dist' ship with prebuilt documentation.
-    if ! test -f doc/clab.7; then
-        clab_install_man="no"
-        AC_MSG_WARN([You are building an unreleased version of libclab and asciidoc or xmlto are not installed.])
+    if ! test -f doc/curvezmq.7; then
+        curvezmq_install_man="no"
+        AC_MSG_WARN([You are building an unreleased version of libcurvezmq and asciidoc or xmlto are not installed.])
         AC_MSG_WARN([Documentation will not be built and manual pages will not be installed.])
     fi
 fi
 AC_MSG_CHECKING([whether to build documentation])
-AC_MSG_RESULT([$clab_build_doc])
+AC_MSG_RESULT([$curvezmq_build_doc])
 AC_MSG_CHECKING([whether to install manpages])
-AC_MSG_RESULT([$clab_install_man])
+AC_MSG_RESULT([$curvezmq_install_man])
 
-# Set some default features required by libclab code.
+# Set some default features required by libcurvezmq code.
 CPPFLAGS="-D_REENTRANT -D_THREAD_SAFE $CPPFLAGS"
 
 # OS-specific tests
@@ -152,62 +152,62 @@ case "${host_os}" in
     *linux*)
         # Define on Linux to enable all library features
         CPPFLAGS="-D_GNU_SOURCE -DLINUX $CPPFLAGS"
-        AC_DEFINE(CLAB_HAVE_LINUX, 1, [Have Linux OS])
+        AC_DEFINE(HAVE_LINUX, 1, [Have Linux OS])
         
         case "${host_os}" in
             *android*)
-                AC_DEFINE(CLAB_HAVE_ANDROID, 1, [Have Android OS])
-                clab_on_android="yes"
+                AC_DEFINE(HAVE_ANDROID, 1, [Have Android OS])
+                curvezmq_on_android="yes"
             ;;
         esac
         ;;
     *solaris*)
         # Define on Solaris to enable all library features
         CPPFLAGS="-D_PTHREADS $CPPFLAGS"
-        AC_DEFINE(CLAB_HAVE_SOLARIS, 1, [Have Solaris OS])
+        AC_DEFINE(HAVE_SOLARIS, 1, [Have Solaris OS])
         ;;
     *freebsd*)
         # Define on FreeBSD to enable all library features
         CPPFLAGS="-D__BSD_VISIBLE $CPPFLAGS"
-        AC_DEFINE(CLAB_HAVE_FREEBSD, 1, [Have FreeBSD OS])
+        AC_DEFINE(HAVE_FREEBSD, 1, [Have FreeBSD OS])
         ;;
     *darwin*)
         # Define on Darwin to enable all library features
         CPPFLAGS="-D_DARWIN_C_SOURCE $CPPFLAGS"
-        AC_DEFINE(CLAB_HAVE_OSX, 1, [Have DarwinOSX OS])
+        AC_DEFINE(HAVE_OSX, 1, [Have DarwinOSX OS])
         ;;
     *netbsd*)
         # Define on NetBSD to enable all library features
         CPPFLAGS="-D_NETBSD_SOURCE $CPPFLAGS"
-        AC_DEFINE(CLAB_HAVE_NETBSD, 1, [Have NetBSD OS])
+        AC_DEFINE(HAVE_NETBSD, 1, [Have NetBSD OS])
         ;;
     *openbsd*)
         # Define on OpenBSD to enable all library features
         CPPFLAGS="-D_BSD_SOURCE $CPPFLAGS"
-        AC_DEFINE(CLAB_HAVE_OPENBSD, 1, [Have OpenBSD OS])
+        AC_DEFINE(HAVE_OPENBSD, 1, [Have OpenBSD OS])
         ;;
     *nto-qnx*)
-        AC_DEFINE(CLAB_HAVE_QNXNTO, 1, [Have QNX Neutrino OS])
+        AC_DEFINE(HAVE_QNXNTO, 1, [Have QNX Neutrino OS])
         ;;
     *aix*)
-        AC_DEFINE(CLAB_HAVE_AIX, 1, [Have AIX OS])
+        AC_DEFINE(HAVE_AIX, 1, [Have AIX OS])
         ;;
     *hpux*)
         # Define on HP-UX to enable all library features
         CPPFLAGS="-D_POSIX_C_SOURCE=200112L"
-        AC_DEFINE(CLAB_HAVE_HPUX, 1, [Have HPUX OS])
+        AC_DEFINE(HAVE_HPUX, 1, [Have HPUX OS])
         ;;
     *mingw32*)
-        AC_DEFINE(CLAB_HAVE_WINDOWS, 1, [Have Windows OS])
-        AC_DEFINE(CLAB_HAVE_MINGW32, 1, [Have MinGW32])
+        AC_DEFINE(HAVE_WINDOWS, 1, [Have Windows OS])
+        AC_DEFINE(HAVE_MINGW32, 1, [Have MinGW32])
         AC_CHECK_HEADERS(windows.h)
-        clab_on_mingw32="yes"
-        clab_install_man="no"
+        curvezmq_on_mingw32="yes"
+        curvezmq_install_man="no"
         ;;
     *cygwin*)
         # Define on Cygwin to enable all library features
         CPPFLAGS="-D_GNU_SOURCE $CPPFLAGS"
-        AC_DEFINE(CLAB_HAVE_CYGWIN, 1, [Have Cygwin])
+        AC_DEFINE(HAVE_CYGWIN, 1, [Have Cygwin])
         ;;
     *)
         AC_MSG_ERROR([unsupported system: ${host_os}.])
@@ -240,15 +240,15 @@ if test "x$GCC" = "xyes"; then
     CPPFLAGS="-pedantic -Werror -Wall ${CPPFLAGS}"
 fi
 
-AM_CONDITIONAL(ON_MINGW, test "x$clab_on_mingw32" = "xyes")
-AM_CONDITIONAL(ON_ANDROID, test "x$clab_on_android" = "xyes")
-AM_CONDITIONAL(INSTALL_MAN, test "x$clab_install_man" = "xyes")
-AM_CONDITIONAL(BUILD_DOC, test "x$clab_build_doc" = "xyes")
+AM_CONDITIONAL(ON_MINGW, test "x$curvezmq_on_mingw32" = "xyes")
+AM_CONDITIONAL(ON_ANDROID, test "x$curvezmq_on_android" = "xyes")
+AM_CONDITIONAL(INSTALL_MAN, test "x$curvezmq_install_man" = "xyes")
+AM_CONDITIONAL(BUILD_DOC, test "x$curvezmq_build_doc" = "xyes")
 
 # Checks for library functions.
 AC_TYPE_SIGNAL
 AC_CHECK_FUNCS(perror gettimeofday memset getifaddrs freeifaddrs)
 
 # Specify output files
-AC_CONFIG_FILES([Makefile src/Makefile doc/Makefile src/libclab.pc])
+AC_CONFIG_FILES([Makefile src/Makefile doc/Makefile src/libcurvezmq.pc])
 AC_OUTPUT
