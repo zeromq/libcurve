@@ -3,7 +3,7 @@
 
 # CurveZMQ - authentication and encryption library
 
-CurveZMQ implements the rfc.zeromq.org/spec:26 elliptic curve security mechanism and makes it easy to use in ZeroMQ applications. 
+CurveZMQ implements the rfc.zeromq.org/spec:26 elliptic curve security mechanism and makes it easy to use in ZeroMQ applications.
 
 ## Ownership and License
 

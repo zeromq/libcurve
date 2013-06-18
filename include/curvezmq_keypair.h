@@ -1,5 +1,5 @@
 /*  =========================================================================
-    curvezmq.h - CurveZMQ project
+    curvezmq_keypair - keypair management
 
     -------------------------------------------------------------------------
     Copyright (c) 1991-2013 iMatix Corporation <www.imatix.com>
@@ -22,28 +22,48 @@
     =========================================================================
 */
 
-#ifndef __CURVEZMQ_H_INCLUDED__
-#define __CURVEZMQ_H_INCLUDED__
+#ifndef __CURVEZMQ_KEYPAIR_H_INCLUDED__
+#define __CURVEZMQ_KEYPAIR_H_INCLUDED__
 
-//  CurveZMQ version macros for compile-time API detection
-
-#define CURVEZMQ_VERSION_MAJOR 1
-#define CURVEZMQ_VERSION_MINOR 0
-#define CURVEZMQ_VERSION_PATCH 0
-
-#define CURVEZMQ_MAKE_VERSION(major, minor, patch) \
-    ((major) * 10000 + (minor) * 100 + (patch))
-#define CURVEZMQ_VERSION \
-    CURVEZMQ_MAKE_VERSION(CURVEZMQ_VERSION_MAJOR, CURVEZMQ_VERSION_MINOR, CURVEZMQ_VERSION_PATCH)
-
-#include <czmq.h>
-#if CZMQ_VERSION < 10400
-#   error "CurveZMQ needs CZMQ/1.4.0 or later"
+#ifdef __cplusplus
+extern "C" {
 #endif
 
-//  Classes in the API
+//  Opaque class structure
+typedef struct _curvezmq_keypair_t curvezmq_keypair_t;
 
-#include "curvezmq_keypair.h"
-#include "curvezmq_codec.h"
+//  @interface
+//  Constructor, creates a new public/secret key pair
+CZMQ_EXPORT curvezmq_keypair_t *
+    curvezmq_keypair_new (void);
+    
+//  Destructor
+CZMQ_EXPORT void
+    curvezmq_keypair_destroy (curvezmq_keypair_t **self_p);
+
+//  Save key pair to disk
+CZMQ_EXPORT int
+    curvezmq_keypair_save (curvezmq_keypair_t *self);
+
+//  Constructor, load key pair from disk
+CZMQ_EXPORT curvezmq_keypair_t *
+    curvezmq_keypair_load (void);
+
+//  Return public part of key pair
+CZMQ_EXPORT byte *
+    curvezmq_keypair_public (curvezmq_keypair_t *self);
+    
+//  Return secret part of key pair
+CZMQ_EXPORT byte *
+    curvezmq_keypair_secret (curvezmq_keypair_t *self);
+    
+//  Self test of this class
+void
+    curvezmq_keypair_test (bool verbose);
+//  @end
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

@@ -1,26 +1,28 @@
-lib_LTLIBRARIES = libclab.la
+lib_LTLIBRARIES = libcurvezmq.la
 
 pkgconfigdir = $(libdir)/pkgconfig
-pkgconfig_DATA = libclab.pc
+pkgconfig_DATA = libcurvezmq.pc
 
 include_HEADERS = \
-    ../include/clab.h \
-    ../include/cl_curve.h 
+    ../include/curvezmq.h \
+    ../include/curvezmq_codec.h \
+    ../include/curvezmq_keypair.h 
 
-libclab_la_SOURCES = \
-    cl_curve.c 
+libcurvezmq_la_SOURCES = \
+    curvezmq_codec.c \
+    curvezmq_keypair.c 
 
 INCLUDES = -I$(top_srcdir)/include
-bin_PROGRAMS = clab_selftest
-clab_selftest_LDADD = libclab.la
-clab_selftest_SOURCES = clab_selftest.c
+bin_PROGRAMS = curvezmq_selftest
+curvezmq_selftest_LDADD = libcurvezmq.la
+curvezmq_selftest_SOURCES = curvezmq_selftest.c
 
 if ON_MINGW
-libclab_la_LDFLAGS = -no-undefined -avoid-version -version-info @LTVER@
+libcurvezmq_la_LDFLAGS = -no-undefined -avoid-version -version-info @LTVER@
 else
-libclab_la_LDFLAGS = -version-info @LTVER@
+libcurvezmq_la_LDFLAGS = -version-info @LTVER@
 endif
 
-TESTS = clab_selftest
+TESTS = curvezmq_selftest
 
 

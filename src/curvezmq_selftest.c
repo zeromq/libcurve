@@ -1,13 +1,11 @@
 /*  =========================================================================
-    clab_tests.c - run selftests
-
-    Runs all selftests.
+    curvezmq_tests.c - run selftests
 
     -------------------------------------------------------------------------
     Copyright (c) 1991-2013 iMatix Corporation <www.imatix.com>
     Copyright other contributors as noted in the AUTHORS file.
 
-    This file is part of CLAB, the space for experimental C classes.
+    This file is part of the CurveZMQ authentication and encryption library.
 
     This is free software; you can redistribute it and/or modify it under
     the terms of the GNU Lesser General Public License as published by
@@ -25,7 +23,7 @@
     =========================================================================
 */
 
-#include "../include/clab.h"
+#include "../include/curvezmq.h"
 
 int main (int argc, char *argv [])
 {
@@ -35,9 +33,10 @@ int main (int argc, char *argv [])
     else
         verbose = false;
 
-    printf ("Running CLab self tests...\n");
+    printf ("Running CurveZMQ self tests...\n");
 
-    cl_curve_test (verbose);
+    curvezmq_codec_test (verbose);
+    curvezmq_keypair_test (verbose);
     printf ("Tests passed OK\n");
     return 0;
 }
