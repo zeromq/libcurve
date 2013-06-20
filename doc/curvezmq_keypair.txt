@@ -40,6 +40,7 @@ void
 DESCRIPTION
 -----------
 
+Works with a public-secret keypair.
 
 
 EXAMPLE

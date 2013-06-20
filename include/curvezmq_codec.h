@@ -47,7 +47,7 @@ CZMQ_EXPORT void
 //  Set long term keys for this codec; takes ownership of keypair and
 //  destroys when destroying the codec.
 CZMQ_EXPORT void
-    curvezmq_codec_keypair_set (curvezmq_codec_t *self, curvezmq_keypair_t *keypair);
+    curvezmq_codec_set_keypair (curvezmq_codec_t *self, curvezmq_keypair_t *keypair);
 
 //  Set a metadata property; these are sent to the peer after the
 //  security handshake. Property values are strings.
@@ -65,12 +65,12 @@ CZMQ_EXPORT zframe_t *
     curvezmq_codec_execute (curvezmq_codec_t *self, zframe_t *input);
 
 //  Encode clear-text message to peer. Returns a blob ready to send
-//  on the wire.
+//  on the wire. Encodes frame 'more' property.
 CZMQ_EXPORT zframe_t *
     curvezmq_codec_encode (curvezmq_codec_t *self, zframe_t **cleartext_p);
 
 //  Decode blob into message from peer. Takes ownership of encrypted frame.
-
+//  Sets frame 'more' property for application use.
 CZMQ_EXPORT zframe_t *
     curvezmq_codec_decode (curvezmq_codec_t *self, zframe_t **encrypted_p);
 
