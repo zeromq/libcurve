@@ -24,6 +24,7 @@
 
 /*
 @header
+    Works with a public-secret keypair.
 @discuss
 @end
 */
