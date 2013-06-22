@@ -99,35 +99,35 @@ struct _curvezmq_codec_t {
 //  Command structures
 
 typedef struct {
-    byte id [8];                //  "HELLO   "
+    char id [sizeof ("HELLO")];
     byte version [2];           //  CurveZMQ major-minor version
-    byte padding [70];          //  Anti-amplification padding
+    byte padding [72];          //  Anti-amplification padding
     byte client [32];           //  Client public connection key C'
     byte nonce [8];             //  Short nonce, prefixed by "CurveZMQHELLO---"
     byte box [80];              //  Signature, Box [64 * %x0](C'->S)
 } hello_t;
 
 typedef struct {
-    byte id [8];                //  "WELCOME "
+    char id [sizeof ("WELCOME")];
     byte nonce [16];            //  Long nonce, prefixed by "WELCOME-"
     byte box [144];             //  Box [S' + cookie](S->C')
 } welcome_t;
 
 typedef struct {
-    byte id [8];                //  "INITIATE"
+    char id [sizeof ("INITIATE")];
     byte cookie [96];           //  Server-provided cookie
     byte nonce [8];             //  Short nonce, prefixed by "CurveZMQINITIATE"
     byte box [112];             //  Box [C + vouch + metadata](C'->S')
 } initiate_t;
 
 typedef struct {
-    byte id [8];                //  "READY   "
+    char id [sizeof ("READY")];
     byte nonce [8];             //  Short nonce, prefixed by "CurveZMQREADY---"
     byte box [16];              //  Box [metadata](S'->C')
 } ready_t;
 
 typedef struct {
-    byte id [8];                //  "MESSAGE "
+    char id [sizeof ("MESSAGE")];
     byte nonce [8];             //  Short nonce, prefixed by "CurveZMQMESSAGE-"
     byte box [16];              //  Box [payload](S'->C') or (C'->S')
 } message_t;
@@ -145,8 +145,8 @@ curvezmq_codec_new (byte *server_key)
     //  Check compiler isn't padding our structures mysteriously
     assert (sizeof (hello_t) == 200);
     assert (sizeof (welcome_t) == 168);
-    assert (sizeof (initiate_t) == 224);
-    assert (sizeof (ready_t) == 32);
+    assert (sizeof (initiate_t) == 225);
+    assert (sizeof (ready_t) == 30);
     assert (sizeof (message_t) == 32);
 
     curvezmq_codec_t *self = (curvezmq_codec_t *) zmalloc (sizeof (curvezmq_codec_t));
@@ -353,7 +353,7 @@ s_produce_hello (curvezmq_codec_t *self)
 {
     zframe_t *command = zframe_new (NULL, sizeof (hello_t));
     hello_t *hello = (hello_t *) zframe_data (command);
-    memcpy (hello->id, "HELLO   ", 8);
+    strcpy (hello->id, "HELLO");
 
 #if defined (HAVE_LIBSODIUM)
     //  Generate connection key pair
@@ -391,7 +391,7 @@ s_produce_welcome (curvezmq_codec_t *self)
 {
     zframe_t *command = zframe_new (NULL, sizeof (welcome_t));
     welcome_t *welcome = (welcome_t *) zframe_data (command);
-    memcpy (welcome->id, "WELCOME ", 8);
+    strcpy (welcome->id, "WELCOME");
 
 #if defined (HAVE_LIBSODIUM)
     //  Working variables for crypto calls
@@ -461,7 +461,7 @@ s_produce_initiate (curvezmq_codec_t *self)
 {
     zframe_t *command = zframe_new (NULL, sizeof (initiate_t) + self->metadata_size);
     initiate_t *initiate = (initiate_t *) zframe_data (command);
-    memcpy (initiate->id, "INITIATE", 8);
+    strcpy (initiate->id, "INITIATE");
     memcpy (initiate->cookie, self->cn_cookie, sizeof (initiate->cookie));
 
 #if defined (HAVE_LIBSODIUM)
@@ -563,7 +563,7 @@ s_produce_ready (curvezmq_codec_t *self)
 {
     zframe_t *command = zframe_new (NULL, sizeof (ready_t) + self->metadata_size);
     ready_t *ready = (ready_t *) zframe_data (command);
-    memcpy (ready->id, "READY   ", 8);
+    strcpy (ready->id, "READY");
     s_encrypt (self, ready->nonce, 
                self->metadata, self->metadata_size, 
                "CurveZMQREADY---", 
@@ -597,7 +597,7 @@ s_produce_message (curvezmq_codec_t *self, zframe_t *clear)
         
     zframe_t *command = zframe_new (NULL, sizeof (message_t) + clear_size);
     message_t *message = (message_t *) zframe_data (command);
-    memcpy (message->id, "MESSAGE ", 8);
+    strcpy (message->id, "MESSAGE");
     s_encrypt (self, message->nonce, 
                clear_data, clear_size, 
                self->is_server? "CurveZMQMESSAGES": "CurveZMQMESSAGEC", 
@@ -654,7 +654,7 @@ curvezmq_codec_execute (curvezmq_codec_t *self, zframe_t *input)
 
     if (self->state == expect_hello
     &&  size == sizeof (hello_t)
-    &&  memcmp (data, "HELLO   ", 8) == 0) {
+    &&  streq ((char *) data, "HELLO")) {
         s_process_hello (self, input);
         output = s_produce_welcome (self);
         self->state = expect_initiate;
@@ -662,7 +662,7 @@ curvezmq_codec_execute (curvezmq_codec_t *self, zframe_t *input)
     else
     if (self->state == expect_welcome
     &&  size == sizeof (welcome_t)
-    &&  memcmp (data, "WELCOME ", 8) == 0) {
+    &&  streq ((char *) data, "WELCOME")) {
         s_process_welcome (self, input);
         output = s_produce_initiate (self);
         self->state = expect_ready;
@@ -670,7 +670,7 @@ curvezmq_codec_execute (curvezmq_codec_t *self, zframe_t *input)
     else
     if (self->state == expect_initiate
     &&  size >= sizeof (initiate_t)
-    &&  memcmp (data, "INITIATE ", 8) == 0) {
+    &&  streq ((char *) data, "INITIATE")) {
         s_process_initiate (self, input);
         output = s_produce_ready (self);
         self->state = connected;
@@ -678,7 +678,7 @@ curvezmq_codec_execute (curvezmq_codec_t *self, zframe_t *input)
     else
     if (self->state == expect_ready
     &&  size >= sizeof (ready_t)
-    &&  memcmp (data, "READY   ", 8) == 0) {
+    &&  streq ((char *) data, "READY")) {
         s_process_ready (self, input);
         self->state = connected;
     }
@@ -722,7 +722,7 @@ curvezmq_codec_decode (curvezmq_codec_t *self, zframe_t **encrypted_p)
     
     zframe_t *cleartext = NULL;
     if (zframe_size (*encrypted_p) >= sizeof (message_t)
-    &&  memcmp (zframe_data (*encrypted_p), "MESSAGE ", 8) == 0)
+    &&  streq ((char *) zframe_data (*encrypted_p), "MESSAGE"))
         cleartext = s_process_message (self, *encrypted_p);
     else
     if (self->verbose)
