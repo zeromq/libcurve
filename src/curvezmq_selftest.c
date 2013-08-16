@@ -33,7 +33,11 @@ int main (int argc, char *argv [])
     else
         verbose = false;
 
-    printf ("Running CurveZMQ self tests...\n");
+	#if defined (HAVE_LIBSODIUM)
+    printf ("Running CurveZMQ self tests with libsudium...\n");
+	#else
+    printf ("Running CurveZMQ self tests without libsodium...\n");
+	#endif
 
     curvezmq_codec_test (verbose);
     curvezmq_keypair_test (verbose);
