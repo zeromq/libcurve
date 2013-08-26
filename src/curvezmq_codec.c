@@ -220,6 +220,9 @@ curvezmq_codec_set_metadata (curvezmq_codec_t *self, char *name, char *value)
 
     //  Update size of metadata so far
     self->metadata_size = needle - self->metadata;
+    //  This is a throwaway implementation; a proper metadata design would use
+    //  a hash table and serialize to any size. TODO: rewrite this.
+    assert (self->metadata_size < 1000);
 }
 
 
@@ -242,7 +245,7 @@ curvezmq_codec_set_verbose (curvezmq_codec_t *self, bool verbose)
     
 static void
 s_encrypt (
-    curvezmq_codec_t *self,         //  curvezmq_codec instance sending the data
+    curvezmq_codec_t *self, //  Codec instance sending the data
     byte *target,           //  target must be nonce + box
     byte *data,             //  Clear text data to encrypt
     size_t size,            //  Size of clear text data
@@ -251,6 +254,10 @@ s_encrypt (
     byte *key_from)         //  Key to encrypt from, may be null
 {
 #if defined (HAVE_LIBSODIUM)
+    //  Plain and encoded buffers are the same size; plain buffer starts
+    //  with 32 (ZEROBYTES) zeros and box starts with 16 (BOXZEROBYTES)
+    //  zeros. box_size is combined size, the same in both cases, and
+    //  encrypted data is thus 16 bytes longer than plain data.
     size_t box_size = crypto_box_ZEROBYTES + size;
     byte *plain = malloc (box_size);
     byte *box = malloc (box_size);
@@ -284,8 +291,10 @@ s_encrypt (
     else
         rc = crypto_box_afternm (box, plain, box_size, nonce, self->cn_precom);
     assert (rc == 0);
-    
-    memcpy (target, box + crypto_box_BOXZEROBYTES, size + crypto_box_BOXZEROBYTES);
+
+    //  Now copy encrypted data into target; it will be 16 bytes longer than
+    //  plain data
+    memcpy (target, box + crypto_box_BOXZEROBYTES, size + 16);
     free (plain);
     free (box);
 #else
@@ -377,11 +386,15 @@ s_process_hello (curvezmq_codec_t *self, zframe_t *input)
     hello_t *hello = (hello_t *) zframe_data (input);
 
     memcpy (self->cn_client, hello->client, 32);
-    byte signature [64];
+    byte signature_received [64];
+    byte signature_expected [64] = { 0 };
     s_decrypt (self, hello->nonce, 
-               signature, 64, 
+               signature_received, 64, 
                "CurveZMQHELLO---", 
                hello->client, curvezmq_keypair_secret (self->keypair));
+    
+    //  TODO: don't assert, but raise error on connection
+    assert (memcmp (signature_received, signature_expected, 64) == 0);
     if (self->verbose)
         puts ("OK");
 }
@@ -428,6 +441,10 @@ s_produce_welcome (curvezmq_codec_t *self)
     s_encrypt (self, welcome->nonce, 
                plain, 128, "WELCOME-", 
                self->cn_client, curvezmq_keypair_secret (self->keypair));
+
+    //  Precompute connection secret from client key
+    rc = crypto_box_beforenm (self->cn_precom, self->cn_client, self->cn_secret);
+    assert (rc == 0);
 #endif
     return command;
 }
@@ -483,7 +500,7 @@ s_produce_initiate (curvezmq_codec_t *self)
     s_encrypt (self, initiate->nonce, 
                plain, 96 + self->metadata_size,
                "CurveZMQINITIATE", 
-               self->cn_server, self->cn_secret);
+               NULL, NULL);
     free (plain);
     free (box);
 #endif
@@ -529,7 +546,7 @@ s_process_initiate (curvezmq_codec_t *self, zframe_t *input)
     s_decrypt (self, initiate->nonce, 
                plain, 96 + metadata_size, 
                "CurveZMQINITIATE", 
-               self->cn_client, self->cn_secret);
+               NULL, NULL);
     
     //  This is where we'd check the decrypted client public key
     memcpy (self->client_key, plain, 32);
@@ -547,10 +564,6 @@ s_process_initiate (curvezmq_codec_t *self, zframe_t *input)
     //  TODO: don't assert, but raise error on connection
     assert (memcmp (plain, self->cn_client, 32) == 0);
 
-    //  Precompute connection secret from client key
-    rc = crypto_box_beforenm (self->cn_precom, self->cn_client, self->cn_secret);
-    assert (rc == 0);
-    
     free (plain);
     free (box);
 #endif
@@ -760,6 +773,7 @@ server_task (void *args)
     //  Create a new server instance and load its keys from the previously 
     //  generated keypair file
     curvezmq_codec_t *server = curvezmq_codec_new (NULL);
+    curvezmq_codec_set_verbose (server, (bool *) args);
     curvezmq_codec_set_keypair (server, curvezmq_keypair_load ());
 
     //  Set some metadata properties
@@ -776,6 +790,7 @@ server_task (void *args)
         zframe_t *input = zframe_recv (router);
         assert (input);
         zframe_t *output = curvezmq_codec_execute (server, input);
+        assert (output);
         zframe_destroy (&input);
         zframe_send (&sender, router, ZFRAME_MORE);
         zframe_send (&output, router, 0);
@@ -822,7 +837,7 @@ curvezmq_codec_test (bool verbose)
     
     //  We'll run the server as a background task, and the
     //  client in this foreground thread.
-    zthread_new (server_task, NULL);
+    zthread_new (server_task, &verbose);
 
     zctx_t *ctx = zctx_new ();
     assert (ctx);
@@ -842,6 +857,7 @@ curvezmq_codec_test (bool verbose)
     //  Execute null event on client to kick off handshake
     zframe_t *output = curvezmq_codec_execute (client, NULL);
     while (!curvezmq_codec_connected (client)) {
+        assert (output);
         rc = zframe_send (&output, dealer, 0);
         assert (rc >= 0);
         zframe_t *input = zframe_recv (dealer);
