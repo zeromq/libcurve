@@ -534,6 +534,8 @@ s_process_initiate (curvezmq_codec_t *self, zframe_t *input)
     int rc = crypto_secretbox_open (plain, box,
                                     crypto_box_BOXZEROBYTES + 80,
                                     nonce, self->cookie_key);
+    assert (rc == 0);
+    
     //  Throw away cookie key
     memset (self->cookie_key, 0, 32);
 
