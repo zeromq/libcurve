@@ -1,67 +1,67 @@
-libcurve_codec(3)
-=================
+curve_codec(3)
+==============
 
 NAME
 ----
-libcurve_codec - core engine (rfc.zeromq.org/spec:26)
+curve_codec - core CurveZMQ engine (rfc.zeromq.org/spec:26)
 
 SYNOPSIS
 --------
 ----
 //  Constructor
-//  Create a new libcurve_codec instance; if you provide a server-key, is a 
+//  Create a new curve_codec instance; if you provide a server-key, is a 
 //  client that can talk to that specific server. Otherwise is a server that 
 //  will talk to one specific client.
-CZMQ_EXPORT libcurve_codec_t *
-    libcurve_codec_new (byte *server_key);
+CZMQ_EXPORT curve_codec_t *
+    curve_codec_new (byte *server_key);
     
 //  Destructor
 CZMQ_EXPORT void
-    libcurve_codec_destroy (libcurve_codec_t **self_p);
+    curve_codec_destroy (curve_codec_t **self_p);
 
 //  Set long term keys for this codec; takes ownership of keypair and
 //  destroys when destroying the codec.
 CZMQ_EXPORT void
-    libcurve_codec_set_keypair (libcurve_codec_t *self, libcurve_keypair_t *keypair);
+    curve_codec_set_keypair (curve_codec_t *self, curve_keypair_t *keypair);
 
 //  Set a metadata property; these are sent to the peer after the
 //  security handshake. Property values are strings.
 CZMQ_EXPORT void
-    libcurve_codec_set_metadata (libcurve_codec_t *self, char *name, char *value);
+    curve_codec_set_metadata (curve_codec_t *self, char *name, char *value);
 
-//  Set tracing on libcurve_codec instance. Will report activity to stdout.
+//  Set tracing on curve_codec instance. Will report activity to stdout.
 CZMQ_EXPORT void
-    libcurve_codec_set_verbose (libcurve_codec_t *self, bool verbose);
+    curve_codec_set_verbose (curve_codec_t *self, bool verbose);
 
 //  Accept input command from peer. If the command is invalid, it is
 //  discarded silently. May return a blob to send to the peer, or NULL
 //  if there is nothing to send.
 CZMQ_EXPORT zframe_t *
-    libcurve_codec_execute (libcurve_codec_t *self, zframe_t *input);
+    curve_codec_execute (curve_codec_t *self, zframe_t *input);
 
 //  Encode clear-text message to peer. Returns a blob ready to send
 //  on the wire. Encodes frame 'more' property.
 CZMQ_EXPORT zframe_t *
-    libcurve_codec_encode (libcurve_codec_t *self, zframe_t **cleartext_p);
+    curve_codec_encode (curve_codec_t *self, zframe_t **cleartext_p);
 
 //  Decode blob into message from peer. Takes ownership of encrypted frame.
 //  Sets frame 'more' property for application use.
 CZMQ_EXPORT zframe_t *
-    libcurve_codec_decode (libcurve_codec_t *self, zframe_t **encrypted_p);
+    curve_codec_decode (curve_codec_t *self, zframe_t **encrypted_p);
 
 //  Indicate whether handshake is still in progress
 CZMQ_EXPORT bool
-    libcurve_codec_connected (libcurve_codec_t *self);
+    curve_codec_connected (curve_codec_t *self);
 
 //  Self test of this class
 void
-    libcurve_codec_test (bool verbose);
+    curve_codec_test (bool verbose);
 ----
 
 DESCRIPTION
 -----------
 
-libcurve is a security engine, for use in ZeroMQ CZMQ applications.
+Curve is a security engine library for use in ZeroMQ CZMQ applications.
 This is a reference implementation of CurveZMQ, and can be used at the
 application level to secure a request-reply dialog (usually, DEALER to
 ROUTER). For an example of use, see the selftest function. To compile
@@ -72,12 +72,12 @@ in clear text.
 
 This class does no I/O; all socket input/output is done by the caller
 which passes frames to and from this class. It still lacks support for
-multipart messages, for client authentication (will be done using the
-rfc.zeromq.org/spec:27/ZAP protocol), and proper error handling.
+client authentication (will be done using the 
+http://rfc.zeromq.org/spec:27/ZAP protocol), and proper error handling.
 
 EXAMPLE
 -------
-.From libcurve_codec_test method
+.From curve_codec_test method
 ----
 void *
 server_task (void *args)
@@ -90,12 +90,12 @@ server_task (void *args)
 
     //  Create a new server instance and load its keys from the previously 
     //  generated keypair file
-    libcurve_codec_t *server = libcurve_codec_new (NULL);
-    libcurve_codec_set_verbose (server, (bool *) args);
-    libcurve_codec_set_keypair (server, libcurve_keypair_load ());
+    curve_codec_t *server = curve_codec_new (NULL);
+    curve_codec_set_verbose (server, (bool *) args);
+    curve_codec_set_keypair (server, curve_keypair_load ());
 
     //  Set some metadata properties
-    libcurve_codec_set_metadata (server, "Server", "CURVEZMQ/libcurve_codec");
+    curve_codec_set_metadata (server, "Server", "CURVEZMQ/curve_codec");
     
     //  A hack to get the thread to timeout and exit so we can test
     //  under Valgrind. Do NOT do this on real servers!
@@ -103,11 +103,11 @@ server_task (void *args)
 
     //  Execute incoming frames until ready or exception
     //  In practice we'd want a server instance per unique client
-    while (!libcurve_codec_connected (server)) {
+    while (!curve_codec_connected (server)) {
         zframe_t *sender = zframe_recv (router);
         zframe_t *input = zframe_recv (router);
         assert (input);
-        zframe_t *output = libcurve_codec_execute (server, input);
+        zframe_t *output = curve_codec_execute (server, input);
         assert (output);
         zframe_destroy (&input);
         zframe_send (&sender, router, ZFRAME_MORE);
@@ -121,29 +121,29 @@ server_task (void *args)
             break;          //  Timed-out, finished
         zframe_t *encrypted = zframe_recv (router);
         assert (encrypted);
-        zframe_t *cleartext = libcurve_codec_decode (server, &encrypted);
+        zframe_t *cleartext = curve_codec_decode (server, &encrypted);
         assert (cleartext);
         
-        encrypted = libcurve_codec_encode (server, &cleartext);
+        encrypted = curve_codec_encode (server, &cleartext);
         assert (encrypted);
         zframe_send (&sender, router, ZFRAME_MORE);
         zframe_send (&encrypted, router, 0);
     }
-    libcurve_codec_destroy (&server);
+    curve_codec_destroy (&server);
     zctx_destroy (&ctx);
     return NULL;
 }
     //  Generate new long-term key pair for our test server
     //  The key pair will be stored in "secret.key"
-    libcurve_keypair_t *keypair = libcurve_keypair_new ();
-    int rc = libcurve_keypair_save (keypair);
+    curve_keypair_t *keypair = curve_keypair_new ();
+    int rc = curve_keypair_save (keypair);
     assert (rc == 0);
     assert (zfile_exists ("secret.key"));
     
     //  This is how we "share" the server key in our test
     byte server_key [32];
-    memcpy (server_key, libcurve_keypair_public (keypair), 32);
-    libcurve_keypair_destroy (&keypair);
+    memcpy (server_key, curve_keypair_public (keypair), 32);
+    curve_keypair_destroy (&keypair);
     
     //  We'll run the server as a background task, and the
     //  client in this foreground thread.
@@ -156,49 +156,49 @@ server_task (void *args)
     assert (rc != -1);
     
     //  Create a new client instance using shared server key
-    libcurve_codec_t *client = libcurve_codec_new (server_key);
-    libcurve_codec_set_verbose (client, verbose);
-    libcurve_codec_set_keypair (client, libcurve_keypair_new ());
+    curve_codec_t *client = curve_codec_new (server_key);
+    curve_codec_set_verbose (client, verbose);
+    curve_codec_set_keypair (client, curve_keypair_new ());
 
     //  Set some metadata properties
-    libcurve_codec_set_metadata (client, "Client", "CURVEZMQ/libcurve_codec");
-    libcurve_codec_set_metadata (client, "Identity", "E475DA11");
+    curve_codec_set_metadata (client, "Client", "CURVEZMQ/curve_codec");
+    curve_codec_set_metadata (client, "Identity", "E475DA11");
     
     //  Execute null event on client to kick off handshake
-    zframe_t *output = libcurve_codec_execute (client, NULL);
-    while (!libcurve_codec_connected (client)) {
+    zframe_t *output = curve_codec_execute (client, NULL);
+    while (!curve_codec_connected (client)) {
         assert (output);
         rc = zframe_send (&output, dealer, 0);
         assert (rc >= 0);
         zframe_t *input = zframe_recv (dealer);
         assert (input);
-        output = libcurve_codec_execute (client, input);
+        output = curve_codec_execute (client, input);
         zframe_destroy (&input);
     }
     //  Handshake is done, now try Hello, World
     zframe_t *cleartext = zframe_new ((byte *) "Hello, World", 12);
-    zframe_t *encrypted = libcurve_codec_encode (client, &cleartext);
+    zframe_t *encrypted = curve_codec_encode (client, &cleartext);
     assert (encrypted);
     zframe_send (&encrypted, dealer, 0);
 
     encrypted = zframe_recv (dealer);
     assert (encrypted);
     
-    cleartext = libcurve_codec_decode (client, &encrypted);
+    cleartext = curve_codec_decode (client, &encrypted);
     assert (cleartext);
     assert (zframe_size (cleartext) == 12);
     assert (memcmp (zframe_data (cleartext), "Hello, World", 12) == 0);
     zframe_destroy (&cleartext);
 
-    //  Try a multi-part message
+    //  Try a multipart message
     cleartext = zframe_new ((byte *) "Hello, World", 12);
     zframe_set_more (cleartext, 1);
-    encrypted = libcurve_codec_encode (client, &cleartext);
+    encrypted = curve_codec_encode (client, &cleartext);
     assert (encrypted);
     zframe_send (&encrypted, dealer, 0);
 
     encrypted = zframe_recv (dealer);
-    cleartext = libcurve_codec_decode (client, &encrypted);
+    cleartext = curve_codec_decode (client, &encrypted);
     assert (cleartext);
     assert (zframe_more (cleartext) == 1);
     zframe_destroy (&cleartext);
@@ -215,13 +215,13 @@ server_task (void *args)
         for (byte_nbr = 0; byte_nbr < size; byte_nbr++) 
             zframe_data (cleartext)[byte_nbr] = (byte) byte_nbr;
 
-        encrypted = libcurve_codec_encode (client, &cleartext);
+        encrypted = curve_codec_encode (client, &cleartext);
         assert (encrypted);
         zframe_send (&encrypted, dealer, 0);
         
         encrypted = zframe_recv (dealer);
         assert (encrypted);
-        cleartext = libcurve_codec_decode (client, &encrypted);
+        cleartext = curve_codec_decode (client, &encrypted);
         assert (cleartext);
         assert (zframe_size (cleartext) == size);
         for (byte_nbr = 0; byte_nbr < size; byte_nbr++) {
@@ -234,7 +234,7 @@ server_task (void *args)
     zclock_sleep (1000);
 
     //  Done, clean-up
-    libcurve_codec_destroy (&client);
+    curve_codec_destroy (&client);
     zfile_delete ("public.key");
     zfile_delete ("secret.key");
     zctx_destroy (&ctx);

@@ -1,6 +1,6 @@
 MAN1 =
-MAN3 = libcurve_codec.3 libcurve_keypair.3
-MAN7 = libcurve.7
+MAN3 = curve_codec.3 curve_keypair.3
+MAN7 = curve.7
 MAN_DOC = $(MAN1) $(MAN3) $(MAN7)
 
 MAN_TXT = $(MAN1:%.1=%.txt)

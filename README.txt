@@ -1,11 +1,11 @@
 .set GIT=https://github.com/zeromq/libcurve
 .sub 0MQ=ØMQ
 
-# libcurve - authentication and encryption library
+# Curve - authentication and encryption library
 
-libcurve implements the [CurveZMQ](http://rfc.zeromq.org/spec:26) elliptic curve security mechanism, for use in ZeroMQ applications. This library is primarily a reference implementation for the CurveZMQ specification but may also be used for end-to-end security.
+Curve implements the [CurveZMQ](http://rfc.zeromq.org/spec:26) elliptic curve security mechanism, for use in ZeroMQ applications. This library is primarily a reference implementation for the CurveZMQ specification but may also be used for end-to-end security.
 
-The ZeroMQ core library has its own implementation of CurveZMQ over TCP, since July 2013. The libcurve library is intended:
+The ZeroMQ core library has its own implementation of CurveZMQ over TCP, since July 2013. The Curve library is intended:
 
 * To facilitate CurveZMQ implementations in other languages by providing a reference implementation.
 * To provide security for older versions of ZeroMQ.
@@ -18,7 +18,7 @@ The design of CurveZMQ stays as close as possible to the security handshake of [
 
 ## Ownership and License
 
-libcurve's contributors are listed in the AUTHORS file. It is held by the ZeroMQ organization at github.com. The authors of libcurve grant you use of this software under the terms of the GNU Lesser General Public License (LGPL). For details see the files `COPYING` and `COPYING.LESSER` in this directory.
+Curve's contributors are listed in the AUTHORS file. It is held by the ZeroMQ organization at github.com. The authors of Curve grant you use of this software under the terms of the GNU Lesser General Public License (LGPL). For details see the files `COPYING` and `COPYING.LESSER` in this directory.
 
 ## Contributing
 
@@ -26,7 +26,7 @@ This project uses the [C4.1 (Collective Code Construction Contract)](http://rfc.
 
 This project uses the [CLASS (C Language Style for Scalabilty)](http://rfc.zeromq.org/spec:21) guide for code style.
 
-To report an issue, use the [libcurve issue tracker]($(GIT)/issues) at github.com.
+To report an issue, use the [Curve issue tracker]($(GIT)/issues) at github.com.
 
 ## Dependencies
 
@@ -82,9 +82,9 @@ You will need the libtool and autotools packages. On FreeBSD, you may need to sp
 
 ## Linking with an Application
 
-Include `libcurve.h` in your application and link with libcurve. Here is a typical gcc link command:
+Include `curve.h` in your application and link with libcurve. Here is a typical gcc link command:
 
-    gcc -lcurve -lzmq -lczmq myapp.c -o myapp
+    gcc -lcurve -lsodium -lzmq -lczmq myapp.c -o myapp
 
 ## Documentation
 

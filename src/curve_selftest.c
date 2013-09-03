@@ -1,11 +1,11 @@
 /*  =========================================================================
-    libcurve_tests.c - run selftests
+    curve_tests.c - run selftests
 
     -------------------------------------------------------------------------
     Copyright (c) 1991-2013 iMatix Corporation <www.imatix.com>
     Copyright other contributors as noted in the AUTHORS file.
 
-    This file is part of the libcurve authentication and encryption library.
+    This file is part of the Curve authentication and encryption library.
 
     This is free software; you can redistribute it and/or modify it under
     the terms of the GNU Lesser General Public License as published by
@@ -23,7 +23,7 @@
     =========================================================================
 */
 
-#include "../include/libcurve.h"
+#include "../include/curve.h"
 #include "platform.h"
 
 int main (int argc, char *argv [])
@@ -38,8 +38,8 @@ int main (int argc, char *argv [])
     printf ("W: libsodium not installed, running null selftests\n");
 #   endif
 
-    libcurve_codec_test (verbose);
-    libcurve_keypair_test (verbose);
+    curve_codec_test (verbose);
+    curve_keypair_test (verbose);
     printf ("Tests passed OK\n");
     return 0;
 }
