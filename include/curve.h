@@ -1,11 +1,11 @@
 /*  =========================================================================
-    libcurve.h - CurveZMQ project
+    curve.h - Curve public interface
 
     -------------------------------------------------------------------------
     Copyright (c) 1991-2013 iMatix Corporation <www.imatix.com>
     Copyright other contributors as noted in the AUTHORS file.
 
-    This file is part of the CurveZMQ authentication and encryption library.
+    This file is part of the Curve authentication and encryption library.
 
     This is free software; you can redistribute it and/or modify it under
     the terms of the GNU Lesser General Public License as published by the 
@@ -22,28 +22,28 @@
     =========================================================================
 */
 
-#ifndef __LIBCURVE_H_INCLUDED__
-#define __LIBCURVE_H_INCLUDED__
+#ifndef __CURVE_H_INCLUDED__
+#define __CURVE_H_INCLUDED__
 
 //  libcurve version macros for compile-time API detection
 
-#define LIBCURVE_VERSION_MAJOR 1
-#define LIBCURVE_VERSION_MINOR 0
-#define LIBCURVE_VERSION_PATCH 0
+#define CURVE_VERSION_MAJOR 1
+#define CURVE_VERSION_MINOR 0
+#define CURVE_VERSION_PATCH 0
 
-#define LIBCURVE_MAKE_VERSION(major, minor, patch) \
+#define CURVE_MAKE_VERSION(major, minor, patch) \
     ((major) * 10000 + (minor) * 100 + (patch))
-#define LIBCURVE_VERSION \
-    LIBCURVE_MAKE_VERSION(LIBCURVE_VERSION_MAJOR, LIBCURVE_VERSION_MINOR, LIBCURVE_VERSION_PATCH)
+#define CURVE_VERSION \
+    CURVE_MAKE_VERSION(CURVE_VERSION_MAJOR, CURVE_VERSION_MINOR, CURVE_VERSION_PATCH)
 
 #include <czmq.h>
 #if CZMQ_VERSION < 10400
-#   error "CurveZMQ needs CZMQ/1.4.0 or later"
+#   error "libcurve needs CZMQ/1.4.0 or later"
 #endif
 
 //  Classes in the API
 
-#include "libcurve_keypair.h"
-#include "libcurve_codec.h"
+#include "curve_keypair.h"
+#include "curve_codec.h"
 
 #endif

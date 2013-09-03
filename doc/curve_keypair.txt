@@ -1,40 +1,40 @@
-libcurve_keypair(3)
-===================
+curve_keypair(3)
+================
 
 NAME
 ----
-libcurve_keypair - keypair management
+curve_keypair - keypair management
 
 SYNOPSIS
 --------
 ----
 //  Constructor, creates a new public/secret key pair
-CZMQ_EXPORT libcurve_keypair_t *
-    libcurve_keypair_new (void);
+CZMQ_EXPORT curve_keypair_t *
+    curve_keypair_new (void);
     
 //  Destructor
 CZMQ_EXPORT void
-    libcurve_keypair_destroy (libcurve_keypair_t **self_p);
+    curve_keypair_destroy (curve_keypair_t **self_p);
 
 //  Save key pair to disk
 CZMQ_EXPORT int
-    libcurve_keypair_save (libcurve_keypair_t *self);
+    curve_keypair_save (curve_keypair_t *self);
 
 //  Constructor, load key pair from disk
-CZMQ_EXPORT libcurve_keypair_t *
-    libcurve_keypair_load (void);
+CZMQ_EXPORT curve_keypair_t *
+    curve_keypair_load (void);
 
 //  Return public part of key pair
 CZMQ_EXPORT byte *
-    libcurve_keypair_public (libcurve_keypair_t *self);
+    curve_keypair_public (curve_keypair_t *self);
     
 //  Return secret part of key pair
 CZMQ_EXPORT byte *
-    libcurve_keypair_secret (libcurve_keypair_t *self);
+    curve_keypair_secret (curve_keypair_t *self);
     
 //  Self test of this class
 void
-    libcurve_keypair_test (bool verbose);
+    curve_keypair_test (bool verbose);
 ----
 
 DESCRIPTION
@@ -45,17 +45,17 @@ Works with a public-secret keypair.
 
 EXAMPLE
 -------
-.From libcurve_keypair_test method
+.From curve_keypair_test method
 ----
     //  Generate new long-term key pair for our test server
     //  The key pair will be stored in "secret.key"
-    libcurve_keypair_t *keypair = libcurve_keypair_new ();
-    int rc = libcurve_keypair_save (keypair);
+    curve_keypair_t *keypair = curve_keypair_new ();
+    int rc = curve_keypair_save (keypair);
     assert (rc == 0);
     assert (zfile_exists ("secret.key"));
-    assert (libcurve_keypair_secret (keypair));
-    assert (libcurve_keypair_public (keypair));
-    libcurve_keypair_destroy (&keypair);
+    assert (curve_keypair_secret (keypair));
+    assert (curve_keypair_public (keypair));
+    curve_keypair_destroy (&keypair);
     //  Done, clean-up
     zfile_delete ("public.key");
     zfile_delete ("secret.key");

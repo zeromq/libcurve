@@ -1,6 +1,6 @@
 #  Run selftests and check memory
 echo "Rebuilding libcurve..."
-gcc -g -o libcurve_selftest libcurve_*.c ${CFLAGS} ${LDFLAGS} -lzmq -lczmq -lsodium -lpthread
+gcc -g -o curve_selftest curve_*.c ${CFLAGS} ${LDFLAGS} -lczmq -lzmq -lsodium -lpthread
 if [ $? -eq 0 ]; then
     echo "Starting Valgrind memcheck..."
     valgrind --tool=memcheck --leak-check=full --suppressions=valgrind.supp ./libcurve_selftest -v

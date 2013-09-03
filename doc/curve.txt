@@ -4,15 +4,15 @@ libcurve(7)
 
 NAME
 ----
-libcurve - an authentication and encryption library for ZeroMQ.
+Curve - an authentication and encryption library for ZeroMQ.
 
 
 SYNOPSIS
 --------
 ----
-#include <libcurve.h>
+#include <curve.h>
 
-cc ['flags'] 'files' -lzmq -lczmq -llibcurve ['libraries']
+cc ['flags'] 'files' -lsodium -lzmq -lczmq -lcurve ['libraries']
 ----
 
 
@@ -22,13 +22,13 @@ DESCRIPTION
 Scope and Goals
 ~~~~~~~~~~~~~~~
 
-libcurve implements the rfc.zeromq.org/spec:26 elliptic curve security 
-mechanism and makes it easy to use in ZeroMQ applications.
+Curve implements the http://rfc.zeromq.org/spec:26 CurveZMQ elliptic 
+curve security mechanism and makes it easy to use in ZeroMQ applications.
 
 License
 ~~~~~~~
 
-The authors of libcurve (see AUTHORS file) grant you free use of this 
+The authors of Curve (see AUTHORS file) grant you free use of this 
 software under the terms of the GNU Lesser General Public License (LGPL). 
 For details see the files `COPYING` and `COPYING.LESSER` in this directory.
 
@@ -41,13 +41,13 @@ see http://rfc.zeromq.org/spec:22 -- process for contributions.
 This project uses the CLASS (C Language Style for Scalabilty) -- see 
 http://rfc.zeromq.org/spec:21 -- guide for code style.
 
-USING libcurve
---------------
+USING CURVE
+-----------
 
 Building and Installing
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-libcurve uses autotools for packaging. To build from git (all example 
+Curve uses autotools for packaging. To build from git (all example 
 commands are for Linux):
 ----
     #   libsodium
@@ -90,7 +90,7 @@ commands are for Linux):
 You will need the pkg-config, libtool, and autoreconf packages. Set the 
 LD_LIBRARY_PATH to /usr/local/libs unless you install elsewhere.
 
-After building, you can run the libcurve selftests:
+After building, you can run the Curve selftests:
 ----
     cd src
     ./libcurve_selftest
@@ -99,8 +99,8 @@ After building, you can run the libcurve selftests:
 Linking with an Application
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Include `libcurve.h` in your application and link with libcurve. Here is a 
+Include `curve.h` in your application and link with libcurve. Here is a 
 typical gcc link command:
 ----
-    gcc -llibcurve -lzmq myapp.c -o myapp
+    gcc -lsodium -lzmq -lczmq -lcurve myapp.c -o myapp
 ----

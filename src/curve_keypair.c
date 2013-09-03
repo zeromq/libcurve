@@ -1,11 +1,11 @@
 /*  =========================================================================
-    libcurve_keypair - keypair management
+    curve_keypair - keypair management
 
     -------------------------------------------------------------------------
     Copyright (c) 1991-2013 iMatix Corporation <www.imatix.com>
     Copyright other contributors as noted in the AUTHORS file.
 
-    This file is part of the libcurve authentication and encryption library.
+    This file is part of the Curve authentication and encryption library.
 
     This is free software; you can redistribute it and/or modify it under
     the terms of the GNU Lesser General Public License as published by the 
@@ -29,7 +29,7 @@
 @end
 */
 
-#include "../include/libcurve.h"
+#include "../include/curve.h"
 #if !defined (__WINDOWS__)
 #   include "platform.h"
 #endif
@@ -44,7 +44,7 @@
 
 
 //  Structure of our class
-struct _libcurve_keypair_t {
+struct _curve_keypair_t {
     byte public_key [32];       //  Our long-term public key
     byte secret_key [32];       //  Our long-term secret key
 };
@@ -53,11 +53,11 @@ struct _libcurve_keypair_t {
 //  --------------------------------------------------------------------------
 //  Constructor, creates a new public/secret key pair
 
-libcurve_keypair_t *
-libcurve_keypair_new (void)
+curve_keypair_t *
+curve_keypair_new (void)
 {
-    libcurve_keypair_t *self = 
-        (libcurve_keypair_t *) zmalloc (sizeof (libcurve_keypair_t));
+    curve_keypair_t *self = 
+        (curve_keypair_t *) zmalloc (sizeof (curve_keypair_t));
 #if defined (HAVE_LIBSODIUM)
     if (self) {
         int rc = crypto_box_keypair (self->public_key, self->secret_key);
@@ -72,11 +72,11 @@ libcurve_keypair_new (void)
 //  Destructor
 
 void
-libcurve_keypair_destroy (libcurve_keypair_t **self_p)
+curve_keypair_destroy (curve_keypair_t **self_p)
 {
     assert (self_p);
     if (*self_p) {
-        libcurve_keypair_t *self = *self_p;
+        curve_keypair_t *self = *self_p;
         free (self);
         *self_p = NULL;
     }
@@ -100,7 +100,7 @@ s_key_to_hex (byte *key)
 //  Save key pair to disk
 
 int
-libcurve_keypair_save (libcurve_keypair_t *self)
+curve_keypair_save (curve_keypair_t *self)
 {
     assert (self);
 
@@ -136,11 +136,11 @@ libcurve_keypair_save (libcurve_keypair_t *self)
 //  Constructor, load key pair from disk; returns NULL if the operation
 //  failed for any reason.
 
-libcurve_keypair_t *
-libcurve_keypair_load (void)
+curve_keypair_t *
+curve_keypair_load (void)
 {
-    libcurve_keypair_t *self = 
-        (libcurve_keypair_t *) zmalloc (sizeof (libcurve_keypair_t));
+    curve_keypair_t *self = 
+        (curve_keypair_t *) zmalloc (sizeof (curve_keypair_t));
         
     int matches = 0;            //  How many key octets we parsed
     zconfig_t *root = zconfig_load ("secret.key");
@@ -159,7 +159,7 @@ libcurve_keypair_load (void)
         }
     }
     if (matches != 64)
-        libcurve_keypair_destroy (&self);
+        curve_keypair_destroy (&self);
     zconfig_destroy (&root);
     return self;
 }
@@ -169,7 +169,7 @@ libcurve_keypair_load (void)
 //  Return public part of key pair
 
 byte *
-libcurve_keypair_public (libcurve_keypair_t *self)
+curve_keypair_public (curve_keypair_t *self)
 {
     assert (self);
     return self->public_key;
@@ -180,7 +180,7 @@ libcurve_keypair_public (libcurve_keypair_t *self)
 //  Return secret part of key pair
 
 byte *
-libcurve_keypair_secret (libcurve_keypair_t *self)
+curve_keypair_secret (curve_keypair_t *self)
 {
     assert (self);
     return self->secret_key;
@@ -191,20 +191,20 @@ libcurve_keypair_secret (libcurve_keypair_t *self)
 //  Selftest
 
 void
-libcurve_keypair_test (bool verbose)
+curve_keypair_test (bool verbose)
 {
-    printf (" * libcurve_keypair: ");
+    printf (" * curve_keypair: ");
 
     //  @selftest
     //  Generate new long-term key pair for our test server
     //  The key pair will be stored in "secret.key"
-    libcurve_keypair_t *keypair = libcurve_keypair_new ();
-    int rc = libcurve_keypair_save (keypair);
+    curve_keypair_t *keypair = curve_keypair_new ();
+    int rc = curve_keypair_save (keypair);
     assert (rc == 0);
     assert (zfile_exists ("secret.key"));
-    assert (libcurve_keypair_secret (keypair));
-    assert (libcurve_keypair_public (keypair));
-    libcurve_keypair_destroy (&keypair);
+    assert (curve_keypair_secret (keypair));
+    assert (curve_keypair_public (keypair));
+    curve_keypair_destroy (&keypair);
     //  Done, clean-up
     zfile_delete ("public.key");
     zfile_delete ("secret.key");

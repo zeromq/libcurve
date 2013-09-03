@@ -2,11 +2,11 @@
 # Process this file with autoconf to produce a configure script.
 AC_PREREQ(2.61)
 #
-# The version number is extracted from include/libcurve.h using
+# The version number is extracted from include/curve.h using
 # the version.sh script. Hence, it should be updated there.
 # The version in git should reflect the *next* version planned.
 #
-AC_INIT([libcurve],[m4_esyscmd([./version.sh libcurve])],[zeromq-dev@lists.zeromq.org])
+AC_INIT([curve],[m4_esyscmd([./version.sh curve])],[zeromq-dev@lists.zeromq.org])
 
 AC_CONFIG_AUX_DIR(config)
 AC_CONFIG_MACRO_DIR(config)
@@ -18,11 +18,11 @@ PV_MAJOR=`echo $PACKAGE_VERSION | cut -d . -f 1`
 PV_MINOR=`echo $PACKAGE_VERSION | cut -d . -f 2`
 PV_PATCH=`echo $PACKAGE_VERSION | cut -d . -f 3`
 AC_DEFINE_UNQUOTED([PACKAGE_VERSION_MAJOR],[$PV_MAJOR],
-    [LIBCURVE major version])
+    [CURVE major version])
 AC_DEFINE_UNQUOTED([PACKAGE_VERSION_MINOR],[$PV_MINOR],
-    [LIBCURVE minor version])
+    [CURVE minor version])
 AC_DEFINE_UNQUOTED([PACKAGE_VERSION_PATCH],[$PV_PATCH],
-    [LIBCURVE patchlevel])
+    [CURVE patchlevel])
 # This lets us use PACKAGE_VERSION in Makefiles
 AC_SUBST(PACKAGE_VERSION)
 
@@ -33,12 +33,12 @@ AC_SUBST(PACKAGE_VERSION)
 # know exactly what you're doing and have read and understand
 # http://www.gnu.org/software/libtool/manual/html_node/Updating-version-info.html
 #
-# libcurve -version-info
+# curve -version-info
 LTVER="1:0:0"
 AC_SUBST(LTVER)
 
 # Capture c flags
-LIBCURVE_ORIG_CFLAGS="${CFLAGS:-none}"
+CURVE_ORIG_CFLAGS="${CFLAGS:-none}"
 
 # Checks for programs
 AC_PROG_CC
@@ -56,13 +56,13 @@ AC_CHECK_LIB([sodium], [sodium_init])
 # Code coverage
 AC_ARG_WITH(gcov, [AS_HELP_STRING([--with-gcov=yes/no],
                   [With GCC Code Coverage reporting.])],
-                  [LIBCURVE_GCOV="$withval"])
+                  [CURVE_GCOV="$withval"])
 
-if test "x${LIBCURVE_GCOV}" == "xyes"; then
+if test "x${CURVE_GCOV}" == "xyes"; then
     CFLAGS="-O0 -g -fprofile-arcs -ftest-coverage"
 
-    if test "x${LIBCURVE_ORIG_CFLAGS}" != "xnone"; then
-        CFLAGS="${CFLAGS} ${LIBCURVE_ORIG_CFLAGS}"
+    if test "x${CURVE_ORIG_CFLAGS}" != "xnone"; then
+        CFLAGS="${CFLAGS} ${CURVE_ORIG_CFLAGS}"
     fi
 fi
 
@@ -70,10 +70,10 @@ fi
 AC_ARG_WITH([libzmq],
             [AS_HELP_STRING([--with-libzmq],
                             [Specify libzmq prefix])],
-            [libcurve_search_libzmq="yes"],
+            [curve_search_libzmq="yes"],
             [])
 
-if test "x$libcurve_search_libzmq" = "xyes"; then
+if test "x$curve_search_libzmq" = "xyes"; then
     if test -r "${with_libzmq}/include/zmq.h"; then
         CFLAGS="-I${with_libzmq}/include ${CFLAGS}"
         LDFLAGS="-L${with_libzmq}/lib ${LDFLAGS}"
@@ -117,34 +117,34 @@ AC_LINK_IFELSE([AC_LANG_PROGRAM([#include <czmq.h>],
                [AC_MSG_ERROR([no. Please specify libczmq installation prefix using --with-libczmq])])
 
 # Platform specific checks
-libcurve_on_mingw32="no"
-libcurve_on_android="no"
+curve_on_mingw32="no"
+curve_on_android="no"
 
 # Host speciffic checks
 AC_CANONICAL_HOST
 
 # Determine whether or not documentation should be built and installed.
-libcurve_build_doc="yes"
-libcurve_install_man="yes"
+curve_build_doc="yes"
+curve_install_man="yes"
 
 # Check for asciidoc and xmlto and don't build the docs if these are not installed.
-AC_CHECK_PROG(libcurve_have_asciidoc, asciidoc, yes, no)
-AC_CHECK_PROG(libcurve_have_xmlto, xmlto, yes, no)
-if test "x$libcurve_have_asciidoc" = "xno" -o "x$libcurve_have_xmlto" = "xno"; then
-    libcurve_build_doc="no"
+AC_CHECK_PROG(curve_have_asciidoc, asciidoc, yes, no)
+AC_CHECK_PROG(curve_have_xmlto, xmlto, yes, no)
+if test "x$curve_have_asciidoc" = "xno" -o "x$curve_have_xmlto" = "xno"; then
+    curve_build_doc="no"
     # Tarballs built with 'make dist' ship with prebuilt documentation.
-    if ! test -f doc/libcurve.7; then
-        libcurve_install_man="no"
-        AC_MSG_WARN([You are building an unreleased version of libcurve and asciidoc or xmlto are not installed.])
+    if ! test -f doc/curve.7; then
+        curve_install_man="no"
+        AC_MSG_WARN([You are building an unreleased version of Curve and asciidoc or xmlto are not installed.])
         AC_MSG_WARN([Documentation will not be built and manual pages will not be installed.])
     fi
 fi
 AC_MSG_CHECKING([whether to build documentation])
-AC_MSG_RESULT([$libcurve_build_doc])
+AC_MSG_RESULT([$curve_build_doc])
 AC_MSG_CHECKING([whether to install manpages])
-AC_MSG_RESULT([$libcurve_install_man])
+AC_MSG_RESULT([$curve_install_man])
 
-# Set some default features required by libcurve code.
+# Set some default features required by Curve code
 CPPFLAGS="-D_REENTRANT -D_THREAD_SAFE $CPPFLAGS"
 
 # OS-specific tests
@@ -157,7 +157,7 @@ case "${host_os}" in
         case "${host_os}" in
             *android*)
                 AC_DEFINE(HAVE_ANDROID, 1, [Have Android OS])
-                libcurve_on_android="yes"
+                curve_on_android="yes"
             ;;
         esac
         ;;
@@ -201,8 +201,8 @@ case "${host_os}" in
         AC_DEFINE(HAVE_WINDOWS, 1, [Have Windows OS])
         AC_DEFINE(HAVE_MINGW32, 1, [Have MinGW32])
         AC_CHECK_HEADERS(windows.h)
-        libcurve_on_mingw32="yes"
-        libcurve_install_man="no"
+        curve_on_mingw32="yes"
+        curve_install_man="no"
         ;;
     *cygwin*)
         # Define on Cygwin to enable all library features
@@ -240,10 +240,10 @@ if test "x$GCC" = "xyes"; then
     CPPFLAGS="-pedantic -Werror -Wall ${CPPFLAGS}"
 fi
 
-AM_CONDITIONAL(ON_MINGW, test "x$libcurve_on_mingw32" = "xyes")
-AM_CONDITIONAL(ON_ANDROID, test "x$libcurve_on_android" = "xyes")
-AM_CONDITIONAL(INSTALL_MAN, test "x$libcurve_install_man" = "xyes")
-AM_CONDITIONAL(BUILD_DOC, test "x$libcurve_build_doc" = "xyes")
+AM_CONDITIONAL(ON_MINGW, test "x$curve_on_mingw32" = "xyes")
+AM_CONDITIONAL(ON_ANDROID, test "x$curve_on_android" = "xyes")
+AM_CONDITIONAL(INSTALL_MAN, test "x$curve_install_man" = "xyes")
+AM_CONDITIONAL(BUILD_DOC, test "x$curve_build_doc" = "xyes")
 
 # Checks for library functions.
 AC_TYPE_SIGNAL
