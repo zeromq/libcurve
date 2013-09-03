@@ -1,11 +1,11 @@
 /*  =========================================================================
-    curvezmq_codec - core engine (rfc.zeromq.org/spec:26)
+    libcurve_codec - core engine (rfc.zeromq.org/spec:26)
 
     -------------------------------------------------------------------------
     Copyright (c) 1991-2013 iMatix Corporation <www.imatix.com>
     Copyright other contributors as noted in the AUTHORS file.
 
-    This file is part of the CurveZMQ authentication and encryption library.
+    This file is part of the libcurve authentication and encryption library.
 
     This is free software; you can redistribute it and/or modify it under
     the terms of the GNU Lesser General Public License as published by the 
@@ -22,65 +22,65 @@
     =========================================================================
 */
 
-#ifndef __CURVEZMQ_CODEC_H_INCLUDED__
-#define __CURVEZMQ_CODEC_H_INCLUDED__
+#ifndef __LIBCURVE_CODEC_H_INCLUDED__
+#define __LIBCURVE_CODEC_H_INCLUDED__
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 //  Opaque class structure
-typedef struct _curvezmq_codec_t curvezmq_codec_t;
+typedef struct _libcurve_codec_t libcurve_codec_t;
 
 //  @interface
 //  Constructor
-//  Create a new curvezmq_codec instance; if you provide a server-key, is a 
+//  Create a new libcurve_codec instance; if you provide a server-key, is a 
 //  client that can talk to that specific server. Otherwise is a server that 
 //  will talk to one specific client.
-CZMQ_EXPORT curvezmq_codec_t *
-    curvezmq_codec_new (byte *server_key);
+CZMQ_EXPORT libcurve_codec_t *
+    libcurve_codec_new (byte *server_key);
     
 //  Destructor
 CZMQ_EXPORT void
-    curvezmq_codec_destroy (curvezmq_codec_t **self_p);
+    libcurve_codec_destroy (libcurve_codec_t **self_p);
 
 //  Set long term keys for this codec; takes ownership of keypair and
 //  destroys when destroying the codec.
 CZMQ_EXPORT void
-    curvezmq_codec_set_keypair (curvezmq_codec_t *self, curvezmq_keypair_t *keypair);
+    libcurve_codec_set_keypair (libcurve_codec_t *self, libcurve_keypair_t *keypair);
 
 //  Set a metadata property; these are sent to the peer after the
 //  security handshake. Property values are strings.
 CZMQ_EXPORT void
-    curvezmq_codec_set_metadata (curvezmq_codec_t *self, char *name, char *value);
+    libcurve_codec_set_metadata (libcurve_codec_t *self, char *name, char *value);
 
-//  Set tracing on curvezmq_codec instance. Will report activity to stdout.
+//  Set tracing on libcurve_codec instance. Will report activity to stdout.
 CZMQ_EXPORT void
-    curvezmq_codec_set_verbose (curvezmq_codec_t *self, bool verbose);
+    libcurve_codec_set_verbose (libcurve_codec_t *self, bool verbose);
 
 //  Accept input command from peer. If the command is invalid, it is
 //  discarded silently. May return a blob to send to the peer, or NULL
 //  if there is nothing to send.
 CZMQ_EXPORT zframe_t *
-    curvezmq_codec_execute (curvezmq_codec_t *self, zframe_t *input);
+    libcurve_codec_execute (libcurve_codec_t *self, zframe_t *input);
 
 //  Encode clear-text message to peer. Returns a blob ready to send
 //  on the wire. Encodes frame 'more' property.
 CZMQ_EXPORT zframe_t *
-    curvezmq_codec_encode (curvezmq_codec_t *self, zframe_t **cleartext_p);
+    libcurve_codec_encode (libcurve_codec_t *self, zframe_t **cleartext_p);
 
 //  Decode blob into message from peer. Takes ownership of encrypted frame.
 //  Sets frame 'more' property for application use.
 CZMQ_EXPORT zframe_t *
-    curvezmq_codec_decode (curvezmq_codec_t *self, zframe_t **encrypted_p);
+    libcurve_codec_decode (libcurve_codec_t *self, zframe_t **encrypted_p);
 
 //  Indicate whether handshake is still in progress
 CZMQ_EXPORT bool
-    curvezmq_codec_connected (curvezmq_codec_t *self);
+    libcurve_codec_connected (libcurve_codec_t *self);
 
 //  Self test of this class
 void
-    curvezmq_codec_test (bool verbose);
+    libcurve_codec_test (bool verbose);
 //  @end
 
 #ifdef __cplusplus

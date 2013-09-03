@@ -13,7 +13,7 @@ libtool
 src/.deps/
 src/Makefile
 src/Makefile.in
-src/libcurvezmq.pc
+src/libcurve.pc
 src/platform.hpp
 src/platform.hpp.in
 src/platform.hpp.in~
@@ -21,12 +21,12 @@ src/stamp-h1
 src/*.o
 src/mtrace.txt
 src/outbin
-src/curvezmq_selftest
+src/libcurve_selftest
 doc/*.3
 doc/*.7
 doc/*.xml
 src/.libs/
-src/curvezmq.la
+src/libcurve.la
 src/platform.h
 src/platform.h.in
 src/platform.h.in~
@@ -42,11 +42,11 @@ ipr
 *.gz
 *.zip
 *.la
-win32/curvezmq.ncb
-win32/curvezmq.vcproj.WS200902.user.user
-win32/curvezmq_selftest.exe.embed.manifest
-win32/curvezmq_selftest.exe.embed.manifest.res
-win32/curvezmq_selftest.exe.intermediate.manifest
-win32/curvezmq_selftest.vcproj.WS200902.user.user
+win32/libcurve.ncb
+win32/libcurve.vcproj.WS200902.user.user
+win32/libcurve_selftest.exe.embed.manifest
+win32/libcurve_selftest.exe.embed.manifest.res
+win32/libcurve_selftest.exe.intermediate.manifest
+win32/libcurve_selftest.vcproj.WS200902.user.user
 builds/mingw32/*.o
 

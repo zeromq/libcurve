@@ -1,0 +1,11 @@
+prefix=@prefix@
+exec_prefix=@exec_prefix@
+libdir=@libdir@
+includedir=@includedir@
+
+Name: libcurve
+Description: CurveZMQ implementation for CZMQ applications
+Version: @VERSION@
+Requires: libzmq libczmq libsodium
+Libs: -L${libdir} -lcurve
+Cflags: -I${includedir}
