@@ -1,11 +1,11 @@
 /*  =========================================================================
-    curvezmq_tests.c - run selftests
+    libcurve_tests.c - run selftests
 
     -------------------------------------------------------------------------
     Copyright (c) 1991-2013 iMatix Corporation <www.imatix.com>
     Copyright other contributors as noted in the AUTHORS file.
 
-    This file is part of the CurveZMQ authentication and encryption library.
+    This file is part of the libcurve authentication and encryption library.
 
     This is free software; you can redistribute it and/or modify it under
     the terms of the GNU Lesser General Public License as published by
@@ -23,7 +23,8 @@
     =========================================================================
 */
 
-#include "../include/curvezmq.h"
+#include "../include/libcurve.h"
+#include "platform.h"
 
 int main (int argc, char *argv [])
 {
@@ -33,14 +34,12 @@ int main (int argc, char *argv [])
     else
         verbose = false;
 
-	#if defined (HAVE_LIBSODIUM)
-    printf ("Running CurveZMQ self tests with libsudium...\n");
-	#else
-    printf ("Running CurveZMQ self tests without libsodium...\n");
-	#endif
+#   if !defined (HAVE_LIBSODIUM)
+    printf ("W: libsodium not installed, running null selftests\n");
+#   endif
 
-    curvezmq_codec_test (verbose);
-    curvezmq_keypair_test (verbose);
+    libcurve_codec_test (verbose);
+    libcurve_keypair_test (verbose);
     printf ("Tests passed OK\n");
     return 0;
 }

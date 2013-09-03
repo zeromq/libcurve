@@ -1,5 +1,5 @@
 /*  =========================================================================
-    curvezmq.h - CurveZMQ project
+    libcurve.h - CurveZMQ project
 
     -------------------------------------------------------------------------
     Copyright (c) 1991-2013 iMatix Corporation <www.imatix.com>
@@ -22,19 +22,19 @@
     =========================================================================
 */
 
-#ifndef __CURVEZMQ_H_INCLUDED__
-#define __CURVEZMQ_H_INCLUDED__
+#ifndef __LIBCURVE_H_INCLUDED__
+#define __LIBCURVE_H_INCLUDED__
 
-//  CurveZMQ version macros for compile-time API detection
+//  libcurve version macros for compile-time API detection
 
-#define CURVEZMQ_VERSION_MAJOR 1
-#define CURVEZMQ_VERSION_MINOR 0
-#define CURVEZMQ_VERSION_PATCH 0
+#define LIBCURVE_VERSION_MAJOR 1
+#define LIBCURVE_VERSION_MINOR 0
+#define LIBCURVE_VERSION_PATCH 0
 
-#define CURVEZMQ_MAKE_VERSION(major, minor, patch) \
+#define LIBCURVE_MAKE_VERSION(major, minor, patch) \
     ((major) * 10000 + (minor) * 100 + (patch))
-#define CURVEZMQ_VERSION \
-    CURVEZMQ_MAKE_VERSION(CURVEZMQ_VERSION_MAJOR, CURVEZMQ_VERSION_MINOR, CURVEZMQ_VERSION_PATCH)
+#define LIBCURVE_VERSION \
+    LIBCURVE_MAKE_VERSION(LIBCURVE_VERSION_MAJOR, LIBCURVE_VERSION_MINOR, LIBCURVE_VERSION_PATCH)
 
 #include <czmq.h>
 #if CZMQ_VERSION < 10400
@@ -43,7 +43,7 @@
 
 //  Classes in the API
 
-#include "curvezmq_keypair.h"
-#include "curvezmq_codec.h"
+#include "libcurve_keypair.h"
+#include "libcurve_codec.h"
 
 #endif
