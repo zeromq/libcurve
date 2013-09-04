@@ -30,18 +30,12 @@
 */
 
 #include "../include/curve.h"
-#if !defined (__WINDOWS__)
-#   include "platform.h"
-#endif
 
-#if defined (HAVE_LIBSODIUM)
-#   include <sodium.h>
-#   if crypto_box_PUBLICKEYBYTES != 32 \
-    || crypto_box_SECRETKEYBYTES != 32
+#include <sodium.h>
+#if crypto_box_PUBLICKEYBYTES != 32 \
+ || crypto_box_SECRETKEYBYTES != 32
 #   error "libsodium not built correctly"
-#   endif
 #endif
-
 
 //  Structure of our class
 struct _curve_keypair_t {
@@ -58,12 +52,10 @@ curve_keypair_new (void)
 {
     curve_keypair_t *self = 
         (curve_keypair_t *) zmalloc (sizeof (curve_keypair_t));
-#if defined (HAVE_LIBSODIUM)
     if (self) {
         int rc = crypto_box_keypair (self->public_key, self->secret_key);
         assert (rc == 0);
     }
-#endif
     return self;
 }
     

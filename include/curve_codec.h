@@ -33,21 +33,24 @@ extern "C" {
 typedef struct _curve_codec_t curve_codec_t;
 
 //  @interface
-//  Constructor
-//  Create a new curve_codec instance; if you provide a server-key, is a 
-//  client that can talk to that specific server. Otherwise is a server that 
-//  will talk to one specific client.
+//  Create a new curve_codec instance for a client that talks to one
+//  server identified by its public key.
 CZMQ_EXPORT curve_codec_t *
-    curve_codec_new (byte *server_key);
+    curve_codec_new_client (byte *server_key);
+
+//  Create a new curve_codec instance for a server that talks to a single
+//  client peer.
+CZMQ_EXPORT curve_codec_t *
+    curve_codec_new_server (void);
     
 //  Destructor
 CZMQ_EXPORT void
     curve_codec_destroy (curve_codec_t **self_p);
 
-//  Set long term keys for this codec; takes ownership of keypair and
+//  Set permanent keys for this codec; takes ownership of keypair and
 //  destroys when destroying the codec.
 CZMQ_EXPORT void
-    curve_codec_set_keypair (curve_codec_t *self, curve_keypair_t *keypair);
+    curve_codec_set_permanent_keys (curve_codec_t *self, curve_keypair_t *keypair);
 
 //  Set a metadata property; these are sent to the peer after the
 //  security handshake. Property values are strings.

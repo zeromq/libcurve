@@ -4,7 +4,7 @@ libcurve(7)
 
 NAME
 ----
-Curve - an authentication and encryption library for ZeroMQ.
+curve - an authentication and encryption library for ZeroMQ.
 
 
 SYNOPSIS
