@@ -81,6 +81,10 @@ CZMQ_EXPORT zframe_t *
 CZMQ_EXPORT bool
     curve_codec_connected (curve_codec_t *self);
 
+//  Indicate whether codec hit a fatal error
+CZMQ_EXPORT bool
+    curve_codec_errored (curve_codec_t *self);
+    
 //  Self test of this class
 void
     curve_codec_test (bool verbose);

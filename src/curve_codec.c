@@ -29,7 +29,6 @@
     reference implementation of CurveZMQ. You will not normally want to use
     it directly in application code as the API is low-level and complex.
     TODO: authentication via ZAP - http://rfc.zeromq.org/spec:27/ZAP
-    TODO: clean exception handling
 @discuss
 @end
 */
@@ -52,9 +51,20 @@ typedef enum {
     expect_welcome,             //  C: accepts WELCOME from server
     expect_initiate,            //  S: accepts INITIATE from client
     expect_ready,               //  C: accepts READY from server
-    expect_message              //  C/S: accepts MESSAGE from server
+    expect_message,             //  C/S: accepts MESSAGE from server
+    errored                     //  Error condition, no work possible
 } state_t;
 
+//  For parsing incoming commands
+
+typedef enum {
+    no_command,               
+    hello_command,               
+    welcome_command,             
+    initiate_command,            
+    ready_command,               
+    message_command   
+} command_t;
 
 //  Structure of our class
 struct _curve_codec_t {
@@ -63,7 +73,6 @@ struct _curve_codec_t {
     curve_keypair_t
         *transient;             //  Our transient key
     byte precomputed [32];      //  Precomputed key
-    
     byte peer_transient [32];   //  Peer transient public key
 
     bool verbose;               //  Trace activity to stdout
@@ -76,6 +85,7 @@ struct _curve_codec_t {
     size_t metadata_size;       //  Actual size so far
 
     bool is_server;             //  True for server-side codec
+    char error_text [128];      //  In case of an error
     
     //  Server connection properties
     byte cookie_key [32];       //  Server cookie key
@@ -237,6 +247,13 @@ curve_codec_set_verbose (curve_codec_t *self, bool verbose)
 //  --------------------------------------------------------------------------
 //  Internal functions for working with CurveZMQ commands
 
+static void
+s_set_error (curve_codec_t *self, char *error_text)
+{
+    strcpy (self->error_text, error_text);
+    self->state = errored;
+}
+
 //  Encrypt a block of data using the connection nonce
 //  If key_to/key_from are null, uses precomputed key
     
@@ -286,6 +303,7 @@ s_encrypt (
         rc = crypto_box (box, plain, box_size, nonce, key_to, key_from);
     else
         rc = crypto_box_afternm (box, plain, box_size, nonce, self->precomputed);
+    //  These calls must always succeed
     assert (rc == 0);
 
     //  Now copy encrypted data into target; it will be 16 bytes longer than
@@ -336,10 +354,13 @@ s_decrypt (
         rc = crypto_box_open (plain, box, box_size, nonce, key_to, key_from);
     else
         rc = crypto_box_open_afternm (plain, box, box_size, nonce, self->precomputed);
-    //  TODO: don't assert, but raise error on connection
-    assert (rc == 0);
+
+    //  If we cannot open the box, it means it's been modified or is unauthentic
+    if (rc == 0)
+        memcpy (data, plain + crypto_box_ZEROBYTES, size);
+    else
+        s_set_error (self, "Could not open box from peer");
     
-    memcpy (data, plain + crypto_box_ZEROBYTES, size);
     free (plain);
     free (box);
 }
@@ -375,8 +396,8 @@ s_process_hello (curve_codec_t *self, zframe_t *input)
                hello->client, 
                curve_keypair_secret (self->permanent));
     
-    //  TODO: don't assert, but raise error on connection
-    assert (memcmp (signature_received, signature_expected, 64) == 0);
+    if (memcmp (signature_received, signature_expected, 64))
+        s_set_error (self, "Invalid signature received from client");
 }
 
 static zframe_t *
@@ -510,37 +531,47 @@ s_process_initiate (curve_codec_t *self, zframe_t *input)
                                     nonce, self->cookie_key);
     //  Throw away the cookie key
     memset (self->cookie_key, 0, 32);
-    assert (rc == 0);
+    if (rc == 0) {
+        //  Check cookie plain text is as expected [C' + s']
+        if (memcmp (plain + crypto_box_ZEROBYTES, self->peer_transient, 32))
+            s_set_error (self, "Cookie contents are not valid (client transient key)");
+        else
+        if (memcmp (plain + crypto_box_ZEROBYTES + 32, 
+                    curve_keypair_secret (self->transient), 32))
+            s_set_error (self, "Cookie contents are not valid (own transient key)");
+    }
+    else
+        s_set_error (self, "Bad cookie received from client");
 
-    //  Check cookie plain text is as expected [C' + s']
-    //  TODO: don't assert, but raise error on connection
-    assert (memcmp (plain + crypto_box_ZEROBYTES, 
-                    self->peer_transient, 32) == 0);
-    assert (memcmp (plain + crypto_box_ZEROBYTES + 32, 
-                    curve_keypair_secret (self->transient), 32) == 0);
-
-    //  Open Box [C + vouch + metadata](C'->S')
-    s_decrypt (self, initiate->nonce, 
-               plain, 96 + metadata_size, 
-               "CurveZMQINITIATE", 
-               NULL, NULL);
+    if (self->state != errored)
+        //  Open Box [C + vouch + metadata](C'->S')
+        s_decrypt (self, initiate->nonce, 
+                plain, 96 + metadata_size, 
+                "CurveZMQINITIATE", 
+                NULL, NULL);
     
-    //  This is where we'd check the decrypted client public key
-    memcpy (self->client_key, plain, 32);
-    //  Metadata is at plain + 96
+    if (self->state != errored)
+        memcpy (self->client_key, plain, 32);
+        //  TODO: call ZAP handler to authenticate client key
     
-    //  Vouch nonce + box is 64 bytes at plain + 32
-    byte vouch [64];
-    memcpy (vouch, plain + 32, 64);
-    s_decrypt (self, vouch, 
-               plain, 32, "VOUCH---",
-               self->client_key, 
-               curve_keypair_secret (self->permanent));
+    if (self->state != errored)
+        //  Metadata is at plain + 96
+        //  TODO: load metadata into zhash for caller to access
     
-    //  What we decrypted must be the short term client public key
-    //  TODO: don't assert, but raise error on connection
-    assert (memcmp (plain, self->peer_transient, 32) == 0);
-
+    if (self->state != errored) {
+        //  Vouch nonce + box is 64 bytes at plain + 32
+        byte vouch [64];
+        memcpy (vouch, plain + 32, 64);
+        s_decrypt (self, vouch, 
+                plain, 32, "VOUCH---",
+                self->client_key, 
+                curve_keypair_secret (self->permanent));
+    }
+    if (self->state != errored) {
+        //  What we decrypted must be the short term client public key
+        if (memcmp (plain, self->peer_transient, 32))
+            s_set_error (self, "Bad vouch received from client");
+    }
     free (plain);
     free (box);
 }
@@ -594,89 +625,106 @@ s_process_message (curve_codec_t *self, zframe_t *input)
 {
     message_t *message = (message_t *) zframe_data (input);
     size_t clear_size = zframe_size (input) - sizeof (message_t);
-    byte  *clear_data = malloc (clear_size);
+    byte *clear_data = malloc (clear_size);
     s_decrypt (self, message->nonce, 
                clear_data, clear_size, 
                self->is_server? "CurveZMQMESSAGEC": "CurveZMQMESSAGES", 
                NULL, NULL);
 
-    //  Create frame with clear text
-    zframe_t *clear = zframe_new (clear_data + 1, clear_size - 1);
-    zframe_set_more (clear, clear_data [0]);
+    zframe_t *clear = NULL;
+    if (self->state != errored) {
+        //  Create frame with clear text
+        clear = zframe_new (clear_data + 1, clear_size - 1);
+        zframe_set_more (clear, clear_data [0]);
+    }
     free (clear_data);
     return clear;
 }
 
 
+//  Detect command type of frame
+command_t
+s_command (zframe_t *input)
+{
+    if (input) {
+        size_t size = zframe_size (input);
+        byte *data = zframe_data (input);
+        if (size == sizeof (hello_t) && memcmp (data, "\x05HELLO", 6) == 0)
+            return hello_command;
+        else
+        if (size >= sizeof (initiate_t) && memcmp (data, "\x08INITIATE", 9) == 0)
+            return initiate_command;
+        else
+        if (size == sizeof (welcome_t) && memcmp (data, "\x07WELCOME", 8) == 0)
+            return welcome_command;
+        else
+        if (size >= sizeof (ready_t) && memcmp (data, "\x05READY", 6) == 0) 
+            return ready_command;
+        else
+        if (size >= sizeof (message_t) && memcmp (data, "\x07MESSAGE", 8) == 0)
+            return message_command;
+    }
+    return no_command;
+}
+    
+
 static zframe_t *
 s_execute_server (curve_codec_t *self, zframe_t *input)
 {
-    //  All server states require input
-    assert (input);
-    size_t size = zframe_size (input);
-    byte *data = zframe_data (input);
-
-    if (self->state == expect_hello
-    &&  size == sizeof (hello_t)    
-    &&  memcmp (data, "\x05HELLO", 6) == 0) {
+    command_t command = s_command (input);
+    if (self->state == expect_hello && command == hello_command) {
         s_process_hello (self, input);
         self->state = expect_initiate;
         return s_produce_welcome (self);
     }
     else
-    if (self->state == expect_initiate
-    &&  size >= sizeof (initiate_t)
-    &&  memcmp (data, "\x08INITIATE", 9) == 0) {
+    if (self->state == expect_initiate && command == initiate_command) {
         s_precompute_key (self);
         s_process_initiate (self, input);
         self->state = expect_message;
         return s_produce_ready (self);
     }
-    if (self->verbose)
-        puts ("E: invalid command");
-    //  TODO: don't assert, but raise error on connection
-    assert (false);
+    else
+    if (self->state == errored)
+        return NULL;
+    
+    s_set_error (self, "Invalid command received from client");
+    return NULL;
 }
 
 static zframe_t *
 s_execute_client (curve_codec_t *self, zframe_t *input) 
 {
-    if (self->state == send_hello) {
+    command_t command = s_command (input);
+    if (self->state == send_hello && command == no_command) {
         self->state = expect_welcome;
         return s_produce_hello (self);
     }
-    //  All other states require input
-    assert (input);
-    size_t size = zframe_size (input);
-    byte *data = zframe_data (input);
-
-    if (self->state == expect_welcome
-    &&  size == sizeof (welcome_t)
-    &&  memcmp (data, "\x07WELCOME", 8) == 0) {
+    else
+    if (self->state == expect_welcome && command == welcome_command) {
         s_process_welcome (self, input);
         s_precompute_key (self);
         self->state = expect_ready;
         return s_produce_initiate (self);
     }
     else
-    if (self->state == expect_ready
-    &&  size >= sizeof (ready_t)
-    &&  memcmp (data, "\x05READY", 6) == 0) {
+    if (self->state == expect_ready && command == ready_command) {
         s_process_ready (self, input);
         self->state = expect_message;
         return NULL;
     }
-    if (self->verbose)
-        puts ("E: invalid command");
-    //  TODO: don't assert, but raise error on connection
-    assert (false);
+    else
+    if (self->state == errored)
+        return NULL;
+    
+    s_set_error (self, "Invalid command received from server");
+    return NULL;
 }
 
 
 //  --------------------------------------------------------------------------
-//  Accept input command from peer. If the command is invalid, it is
-//  discarded silently. May return a frame to send to the peer, or NULL
-//  if there is nothing to send.
+//  Accept input command from peer. May return a frame to send to the peer, 
+//  or NULL if there is nothing to send.
 
 zframe_t *
 curve_codec_execute (curve_codec_t *self, zframe_t *input)
@@ -714,20 +762,24 @@ zframe_t *
 curve_codec_decode (curve_codec_t *self, zframe_t **encrypted_p)
 {
     assert (self);
-    assert (self->state == expect_message);
     assert (encrypted_p);
     assert (*encrypted_p);
     
-    zframe_t *cleartext = NULL;
-    if (zframe_size (*encrypted_p) >= sizeof (message_t)
-    &&  memcmp (zframe_data (*encrypted_p), "\x07MESSAGE", 8) == 0)
-        cleartext = s_process_message (self, *encrypted_p);
+    if (self->state == expect_message) {
+        zframe_t *cleartext = NULL;
+        if (s_command (*encrypted_p) == message_command)
+            cleartext = s_process_message (self, *encrypted_p);
+        else
+            s_set_error (self, "Invalid command (expected MESSAGE)");
+        zframe_destroy (encrypted_p);
+        return cleartext;
+    }
     else
-    if (self->verbose)
-        puts ("E: invalid command");
+    if (self->state == errored)
+        return NULL;
     
-    zframe_destroy (encrypted_p);
-    return cleartext;
+    //  A bad state means the API is being misused
+    assert (false);
 }
 
 
@@ -739,6 +791,17 @@ curve_codec_connected (curve_codec_t *self)
 {
     assert (self);
     return (self->state == expect_message);
+}
+
+
+//  --------------------------------------------------------------------------
+//  Indicate whether codec hit a fatal error
+
+bool
+curve_codec_errored (curve_codec_t *self)
+{
+    assert (self);
+    return (self->state == errored);
 }
 
 
@@ -914,9 +977,16 @@ curve_codec_test (bool verbose)
     }
     //  Give server thread a chance to time-out and exit
     zclock_sleep (1000);
-
-    //  Done, clean-up
     curve_codec_destroy (&client);
+    
+    //  Some invalid operations to test exception handling
+    curve_codec_t *server = curve_codec_new_server ();
+    curve_codec_set_permanent_keys (server, curve_keypair_load ());
+
+    curve_codec_execute (server, NULL);
+    assert (curve_codec_errored (server));
+    curve_codec_destroy (&server);
+    
     zfile_delete ("public.key");
     zfile_delete ("secret.key");
     zctx_destroy (&ctx);
