@@ -349,7 +349,7 @@ s_produce_hello (curve_codec_t *self)
 {
     zframe_t *command = zframe_new (NULL, sizeof (hello_t));
     hello_t *hello = (hello_t *) zframe_data (command);
-    strcpy (hello->id, "HELLO");
+    memcpy (hello->id, "\x05HELLO", 6);
 
     memcpy (hello->client, curve_keypair_public (self->transient), 32);
     byte signature [64] = { 0 };
@@ -364,8 +364,6 @@ s_produce_hello (curve_codec_t *self)
 static void
 s_process_hello (curve_codec_t *self, zframe_t *input)
 {
-    if (self->verbose)
-        printf ("\nC:HELLO: ");
     hello_t *hello = (hello_t *) zframe_data (input);
 
     memcpy (self->peer_transient, hello->client, 32);
@@ -379,8 +377,6 @@ s_process_hello (curve_codec_t *self, zframe_t *input)
     
     //  TODO: don't assert, but raise error on connection
     assert (memcmp (signature_received, signature_expected, 64) == 0);
-    if (self->verbose)
-        puts ("OK");
 }
 
 static zframe_t *
@@ -388,7 +384,7 @@ s_produce_welcome (curve_codec_t *self)
 {
     zframe_t *command = zframe_new (NULL, sizeof (welcome_t));
     welcome_t *welcome = (welcome_t *) zframe_data (command);
-    strcpy (welcome->id, "WELCOME");
+    memcpy (welcome->id, "\x07WELCOME", 8);
 
     //  Working variables for libsodium calls
     byte nonce [24];            //  Full nonces are always 24 bytes
@@ -433,9 +429,6 @@ s_produce_welcome (curve_codec_t *self)
 static void
 s_process_welcome (curve_codec_t *self, zframe_t *input)
 {
-    if (self->verbose)
-        printf ("S:WELCOME: ");
-
     //  Open Box [S' + cookie](C'->S)
     byte plain [128];
     welcome_t *welcome = (welcome_t *) zframe_data (input);
@@ -445,8 +438,6 @@ s_process_welcome (curve_codec_t *self, zframe_t *input)
                curve_keypair_secret (self->transient));
     memcpy (self->peer_transient, plain, 32);
     memcpy (self->cookie, plain + 32, 96);
-    if (self->verbose)
-        puts ("OK");
 }
 
 //  Pre-compute connection secret from peer's transient key
@@ -464,7 +455,7 @@ s_produce_initiate (curve_codec_t *self)
 {
     zframe_t *command = zframe_new (NULL, sizeof (initiate_t) + self->metadata_size);
     initiate_t *initiate = (initiate_t *) zframe_data (command);
-    strcpy (initiate->id, "INITIATE");
+    memcpy (initiate->id, "\x08INITIATE", 9);
     memcpy (initiate->cookie, self->cookie, sizeof (initiate->cookie));
 
     //  Create vouch = Box [C'](C->S)
@@ -497,9 +488,6 @@ s_produce_initiate (curve_codec_t *self)
 static void
 s_process_initiate (curve_codec_t *self, zframe_t *input)
 {
-    if (self->verbose)
-        printf ("C:INITIATE: ");
-
     //  Working variables for crypto calls
     byte nonce [24];
     
@@ -540,8 +528,7 @@ s_process_initiate (curve_codec_t *self, zframe_t *input)
     //  This is where we'd check the decrypted client public key
     memcpy (self->client_key, plain, 32);
     //  Metadata is at plain + 96
-    if (self->verbose)
-        printf ("(received %zd bytes metadata) ", metadata_size);
+    
     //  Vouch nonce + box is 64 bytes at plain + 32
     byte vouch [64];
     memcpy (vouch, plain + 32, 64);
@@ -556,9 +543,6 @@ s_process_initiate (curve_codec_t *self, zframe_t *input)
 
     free (plain);
     free (box);
-
-    if (self->verbose)
-        puts ("OK");
 }
 
 static zframe_t *
@@ -566,7 +550,7 @@ s_produce_ready (curve_codec_t *self)
 {
     zframe_t *command = zframe_new (NULL, sizeof (ready_t) + self->metadata_size);
     ready_t *ready = (ready_t *) zframe_data (command);
-    strcpy (ready->id, "READY");
+    memcpy (ready->id, "\x05READY", 6);
     s_encrypt (self, ready->nonce, 
                self->metadata, self->metadata_size, 
                "CurveZMQREADY---", 
@@ -578,15 +562,11 @@ static void
 s_process_ready (curve_codec_t *self, zframe_t *input)
 {
     ready_t *ready = (ready_t *) zframe_data (input);
-    if (self->verbose)
-        printf ("S:READY: ");
     self->metadata_size = zframe_size (input) - sizeof (ready_t);
     s_decrypt (self, ready->nonce, 
                self->metadata, self->metadata_size, 
                "CurveZMQREADY---", 
                NULL, NULL);
-    if (self->verbose)
-        printf ("(received %zd bytes metadata) OK\n", self->metadata_size);
 }
 
 static zframe_t *
@@ -600,7 +580,7 @@ s_produce_message (curve_codec_t *self, zframe_t *clear)
         
     zframe_t *command = zframe_new (NULL, sizeof (message_t) + clear_size);
     message_t *message = (message_t *) zframe_data (command);
-    strcpy (message->id, "MESSAGE");
+    memcpy (message->id, "\x07MESSAGE", 8);
     s_encrypt (self, message->nonce, 
                clear_data, clear_size, 
                self->is_server? "CurveZMQMESSAGES": "CurveZMQMESSAGEC", 
@@ -613,9 +593,6 @@ static zframe_t *
 s_process_message (curve_codec_t *self, zframe_t *input)
 {
     message_t *message = (message_t *) zframe_data (input);
-    if (self->verbose)
-        printf ("%c:MESSAGE: ", self->is_server? 'C': 'S');
-
     size_t clear_size = zframe_size (input) - sizeof (message_t);
     byte  *clear_data = malloc (clear_size);
     s_decrypt (self, message->nonce, 
@@ -627,9 +604,6 @@ s_process_message (curve_codec_t *self, zframe_t *input)
     zframe_t *clear = zframe_new (clear_data + 1, clear_size - 1);
     zframe_set_more (clear, clear_data [0]);
     free (clear_data);
-    
-    if (self->verbose)
-        printf ("(received %zd bytes data) OK\n", clear_size - 1);
     return clear;
 }
 
@@ -643,8 +617,8 @@ s_execute_server (curve_codec_t *self, zframe_t *input)
     byte *data = zframe_data (input);
 
     if (self->state == expect_hello
-    &&  size == sizeof (hello_t)
-    &&  streq ((char *) data, "HELLO")) {
+    &&  size == sizeof (hello_t)    
+    &&  memcmp (data, "\x05HELLO", 6) == 0) {
         s_process_hello (self, input);
         self->state = expect_initiate;
         return s_produce_welcome (self);
@@ -652,7 +626,7 @@ s_execute_server (curve_codec_t *self, zframe_t *input)
     else
     if (self->state == expect_initiate
     &&  size >= sizeof (initiate_t)
-    &&  streq ((char *) data, "INITIATE")) {
+    &&  memcmp (data, "\x08INITIATE", 9) == 0) {
         s_precompute_key (self);
         s_process_initiate (self, input);
         self->state = expect_message;
@@ -678,7 +652,7 @@ s_execute_client (curve_codec_t *self, zframe_t *input)
 
     if (self->state == expect_welcome
     &&  size == sizeof (welcome_t)
-    &&  streq ((char *) data, "WELCOME")) {
+    &&  memcmp (data, "\x07WELCOME", 8) == 0) {
         s_process_welcome (self, input);
         s_precompute_key (self);
         self->state = expect_ready;
@@ -687,7 +661,7 @@ s_execute_client (curve_codec_t *self, zframe_t *input)
     else
     if (self->state == expect_ready
     &&  size >= sizeof (ready_t)
-    &&  streq ((char *) data, "READY")) {
+    &&  memcmp (data, "\x05READY", 6) == 0) {
         s_process_ready (self, input);
         self->state = expect_message;
         return NULL;
@@ -746,7 +720,7 @@ curve_codec_decode (curve_codec_t *self, zframe_t **encrypted_p)
     
     zframe_t *cleartext = NULL;
     if (zframe_size (*encrypted_p) >= sizeof (message_t)
-    &&  streq ((char *) zframe_data (*encrypted_p), "MESSAGE"))
+    &&  memcmp (zframe_data (*encrypted_p), "\x07MESSAGE", 8) == 0)
         cleartext = s_process_message (self, *encrypted_p);
     else
     if (self->verbose)
