@@ -38,7 +38,7 @@ This project needs these projects:
 
 ## Building and Installing
 
-This project uses autotools for packaging. To build from git (all example commands are for Linux):
+This project uses autotools for packaging. To build from git you must first build libsodium, libzmq, and libczmq. The simplest way currently is to get these directly from GitHub. All example commands are for Linux:
 
     #   libsodium
     git clone git://github.com/jedisct1/libsodium.git
