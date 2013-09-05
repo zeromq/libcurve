@@ -51,7 +51,6 @@ AC_PROG_AWK
 
 # Checks for libraries
 AC_CHECK_LIB([pthread], [pthread_create])
-AC_CHECK_LIB([sodium], [sodium_init])
 
 # Code coverage
 AC_ARG_WITH(gcov, [AS_HELP_STRING([--with-gcov=yes/no],
@@ -116,6 +115,8 @@ AC_LINK_IFELSE([AC_LANG_PROGRAM([#include <czmq.h>],
                [AC_MSG_RESULT([yes])],
                [AC_MSG_ERROR([no. Please specify libczmq installation prefix using --with-libczmq])])
 
+AC_CHECK_LIB([sodium], [sodium_init], ,[AC_MSG_ERROR([cannot link with -lsodium, install libsodium.])])
+               
 # Platform specific checks
 curve_on_mingw32="no"
 curve_on_android="no"

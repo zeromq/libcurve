@@ -24,7 +24,6 @@
 */
 
 #include "../include/curve.h"
-#include "platform.h"
 
 int main (int argc, char *argv [])
 {
@@ -33,10 +32,6 @@ int main (int argc, char *argv [])
         verbose = true;
     else
         verbose = false;
-
-#   if !defined (HAVE_LIBSODIUM)
-    printf ("W: libsodium not installed, running null selftests\n");
-#   endif
 
     curve_codec_test (verbose);
     curve_keypair_test (verbose);
