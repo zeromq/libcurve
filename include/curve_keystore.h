@@ -1,5 +1,5 @@
 /*  =========================================================================
-    curve_keypair - keypair management
+    curve_keystore - keystore management
 
     -------------------------------------------------------------------------
     Copyright (c) 1991-2013 iMatix Corporation <www.imatix.com>
@@ -22,44 +22,47 @@
     =========================================================================
 */
 
-#ifndef __CURVE_KEYPAIR_H_INCLUDED__
-#define __CURVE_KEYPAIR_H_INCLUDED__
+#ifndef __CURVE_KEYSTORE_H_INCLUDED__
+#define __CURVE_KEYSTORE_H_INCLUDED__
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 //  Opaque class structure
-typedef struct _curve_keypair_t curve_keypair_t;
+typedef struct _curve_keystore_t curve_keystore_t;
 
 //  @interface
-//  Constructor, creates a new public/secret key pair
-CZMQ_EXPORT curve_keypair_t *
-    curve_keypair_new (void);
+//  Constructor, creates a new, empty keystore in memory
+CZMQ_EXPORT curve_keystore_t *
+    curve_keystore_new (void);
     
 //  Destructor
 CZMQ_EXPORT void
-    curve_keypair_destroy (curve_keypair_t **self_p);
+    curve_keystore_destroy (curve_keystore_t **self_p);
 
-//  Save key pair to disk
+//  Load keystore data from disk. Returns zero if OK, -1 on error.
 CZMQ_EXPORT int
-    curve_keypair_save (curve_keypair_t *self);
+    curve_keystore_load (curve_keystore_t *self, char *filename);
+    
+//  Save keystore to disk, overwriting any file with the same name.
+//  Returns zero if OK, -1 on error.
+CZMQ_EXPORT int
+    curve_keystore_save (curve_keystore_t *self, char *filename);
 
-//  Constructor, load key pair from disk
+//  Put a keypair into the keystore indexed by some chosen key name.
+CZMQ_EXPORT void
+    curve_keystore_put (curve_keystore_t *self, char *name, 
+                        curve_keypair_t *keypair);
+
+//  Get a keypair from the keystore; returns a valid keypair, or
+//  NULL if the key name did not exist.
 CZMQ_EXPORT curve_keypair_t *
-    curve_keypair_load (void);
+    curve_keystore_get (curve_keystore_t *self, char *name);
 
-//  Return public part of key pair
-CZMQ_EXPORT byte *
-    curve_keypair_public (curve_keypair_t *self);
-    
-//  Return secret part of key pair
-CZMQ_EXPORT byte *
-    curve_keypair_secret (curve_keypair_t *self);
-    
 //  Self test of this class
 void
-    curve_keypair_test (bool verbose);
+    curve_keystore_test (bool verbose);
 //  @end
 
 #ifdef __cplusplus

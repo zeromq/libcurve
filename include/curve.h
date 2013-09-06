@@ -44,6 +44,10 @@
 //  Classes in the API
 
 #include "curve_keypair.h"
+#include "curve_keystore.h"
 #include "curve_codec.h"
+#include "curve_client.h"
+#include "curve_server.h"
+#include "curve_z85.h"
 
 #endif

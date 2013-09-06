@@ -3,26 +3,30 @@ curve_server(3)
 
 NAME
 ----
-curve_server - Curve-secured socket
+curve_server - Secure server socket
 
 SYNOPSIS
 --------
 ----
-//  Create a new curve_socket instance
-CZMQ_EXPORT curve_socket_t *
-    curve_socket_new (void);
+//  Create a new curve_server instance
+CZMQ_EXPORT curve_server_t *
+    curve_server_new (void);
 
 //  Destructor
 CZMQ_EXPORT void
-    curve_socket_destroy (curve_socket_t **self_p);
+    curve_server_destroy (curve_server_t **self_p);
     
+//  Bind server socket to local endpoint
+CZMQ_EXPORT int
+    curve_server_bind (curve_server_t *self, const char *endpoint);
+
 //  Get socket handle, for polling
 CZMQ_EXPORT void *
-    curve_socket_handle (curve_socket_t *self);
+    curve_server_handle (curve_server_t *self);
 
 //  Self test of this class
 void
-    curve_socket_test (bool verbose);
+    curve_server_test (bool verbose);
 ----
 
 DESCRIPTION
@@ -39,8 +43,8 @@ EXAMPLE
 -------
 .From curve_server_test method
 ----
-    curve_socket_t *curve = curve_socket_new ();
-    curve_socket_destroy (&curve);
+    curve_server_t *curve = curve_server_new ();
+    curve_server_destroy (&curve);
 ----
 
 SEE ALSO

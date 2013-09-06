@@ -1,5 +1,5 @@
 /*  =========================================================================
-    curve_server - Secure server socket
+    curve_z85 - Z85 encoding and decoding, see 0MQ RFC 32
 
     -------------------------------------------------------------------------
     Copyright (c) 1991-2013 iMatix Corporation <www.imatix.com>
@@ -22,41 +22,31 @@
     =========================================================================
 */
 
-#ifndef __CURVE_SERVER_H_INCLUDED__
-#define __CURVE_SERVER_H_INCLUDED__
+#ifndef __CURVE_Z85_H_INCLUDED__
+#define __CURVE_Z85_H_INCLUDED__
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 //  Opaque class structure
-typedef struct _curve_server_t curve_server_t;
+typedef struct _curve_z85_t curve_z85_t;
 
 //  @interface
-//  Create a new curve_server instance
-CZMQ_EXPORT curve_server_t *
-    curve_server_new (void);
-
-//  Destructor
-CZMQ_EXPORT void
-    curve_server_destroy (curve_server_t **self_p);
+//  Encode a binary frame as a string; destination string MUST be at least
+//  size * 5 / 4 bytes long. Returns dest. Size must be a multiple of 4.
+CZMQ_EXPORT char *
+    curve_z85_encode (char *dest, uint8_t *data, size_t size);
     
-//  Bind server socket to local endpoint
-CZMQ_EXPORT void
-    curve_server_bind (curve_server_t *self, const char *endpoint);
-
-//  Get socket handle, for polling
-CZMQ_EXPORT void *
-    curve_server_handle (curve_server_t *self);
-
-//  Set metadata property, will be sent to clients at connection
-CZMQ_EXPORT void
-    curve_server_set_meta (curve_server_t *self, 
-                           const char *name, const char *format, ...);
+//  Decode an encoded string into a binary frame; dest must be at least
+//  strlen (string) * 4 / 5 bytes long. Returns dest. strlen (string) 
+//  must be a multiple of 5.
+CZMQ_EXPORT uint8_t *
+    curve_z85_decode (uint8_t *dest, char *string);
     
 //  Self test of this class
 void
-    curve_server_test (bool verbose);
+    curve_z85_test (bool verbose);
 //  @end
 
 #ifdef __cplusplus

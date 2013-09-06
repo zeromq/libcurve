@@ -1,5 +1,5 @@
 /*  =========================================================================
-    curve_keypair - keypair management
+    curve_keystore - keystore management
 
     -------------------------------------------------------------------------
     Copyright (c) 1991-2013 iMatix Corporation <www.imatix.com>
@@ -24,52 +24,46 @@
 
 /*
 @header
-    Works with a public-secret keypair.
+    Manages a set of keys, held in a single text file. This is called a 
+    "keystore". The keystore is always private to the creating user, and
+    since it contains secret keys, should never be shared.
 @discuss
 @end
 */
 
 #include "../include/curve.h"
-#include "z85_codec.h"
-
-#include <sodium.h>
-#if crypto_box_PUBLICKEYBYTES != 32 \
- || crypto_box_SECRETKEYBYTES != 32
-#   error "libsodium not built correctly"
-#endif
 
 //  Structure of our class
-struct _curve_keypair_t {
-    byte public_key [32];       //  Our long-term public key
-    byte secret_key [32];       //  Our long-term secret key
+struct _curve_keystore_t {
+    zhash_t *hash;              //  Keys are stored by name
 };
 
 
 //  --------------------------------------------------------------------------
-//  Constructor, creates a new public/secret key pair
+//  Constructor, creates a new, empty keystore in memory
 
-curve_keypair_t *
-curve_keypair_new (void)
+curve_keystore_t *
+curve_keystore_new (void)
 {
-    curve_keypair_t *self = 
-        (curve_keypair_t *) zmalloc (sizeof (curve_keypair_t));
-    if (self) {
-        int rc = crypto_box_keypair (self->public_key, self->secret_key);
-        assert (rc == 0);
-    }
+    curve_keystore_t *self = 
+        (curve_keystore_t *) zmalloc (sizeof (curve_keystore_t));
+    assert (self);
+    self->hash = zhash_new ();
+    zhash_autofree (self->hash);
     return self;
 }
-    
 
+    
 //  --------------------------------------------------------------------------
 //  Destructor
 
 void
-curve_keypair_destroy (curve_keypair_t **self_p)
+curve_keystore_destroy (curve_keystore_t **self_p)
 {
     assert (self_p);
     if (*self_p) {
-        curve_keypair_t *self = *self_p;
+        curve_keystore_t *self = *self_p;
+        zhash_destroy (&self->hash);
         free (self);
         *self_p = NULL;
     }
@@ -77,85 +71,76 @@ curve_keypair_destroy (curve_keypair_t **self_p)
 
 
 //  --------------------------------------------------------------------------
-//  Save key pair to disk
+//  Load keystore data from disk. Returns zero if OK, -1 on error.
 
 int
-curve_keypair_save (curve_keypair_t *self)
+curve_keystore_load (curve_keystore_t *self, char *filename)
 {
     assert (self);
+    return zhash_load (self->hash, filename);
+}
 
-    //  Set process file create mask to owner access only
+    
+//  --------------------------------------------------------------------------
+//  Save keystore to disk, overwriting any file with the same name.
+//  Returns zero if OK, -1 on error.
+//  We format the keypair as a single value with the public key and secret
+//  key separated by "|". This isn't intended to be human readable, just 
+//  easy to load and parse via zhash.
+
+int
+curve_keystore_save (curve_keystore_t *self, char *filename)
+{
+    assert (self);
     zfile_mode_private ();
-    
-    //  The public key file contains just the public key
-    char text_key [41];
-    zconfig_t *root = zconfig_new ("root", NULL);
-    zconfig_t *key = zconfig_new ("public-key", root);
-    zconfig_set_value (key, "%s", Z85_encode (text_key, self->public_key, 32));
-    zconfig_save (root, "public.key");
-    
-    //  The secret key file contains both secret and public keys
-    key = zconfig_new ("secret-key", root);
-    zconfig_set_value (key, "%s", Z85_encode (text_key, self->secret_key, 32));
-    zconfig_save (root, "secret.key");
-    zconfig_destroy (&root);
-    
-    //  Reset process file create mask
+    int rc = zhash_save (self->hash, filename);
     zfile_mode_default ();
-    return 0;
+    return rc;
 }
 
 
 //  --------------------------------------------------------------------------
-//  Constructor, load key pair from disk; returns NULL if the operation
-//  failed for any reason.
+//  Put a keypair into the keystore indexed by some chosen key name.
+
+void
+curve_keystore_put (curve_keystore_t *self, char *name, curve_keypair_t *keypair)
+{
+    assert (self);
+    assert (name);
+    assert (keypair);
+    
+    //  Encoded as secret|public
+    char value [82];
+    curve_z85_encode (value, curve_keypair_secret (keypair), 32);
+    curve_z85_encode (value + 41, curve_keypair_public (keypair), 32);
+    value [40] = '|';
+    zhash_update (self->hash, name, value);
+}
+
+
+//  --------------------------------------------------------------------------
+//  Get a keypair from the keystore; returns a new, valid keypair, or
+//  NULL if the key name did not exist.
 
 curve_keypair_t *
-curve_keypair_load (void)
+curve_keystore_get (curve_keystore_t *self, char *name)
 {
-    curve_keypair_t *self = 
-        (curve_keypair_t *) zmalloc (sizeof (curve_keypair_t));
-        
-    int matches = 0;            //  How many keys we parsed
-    zconfig_t *root = zconfig_load ("secret.key");
-    if (root) {
-        char *secret_key = zconfig_resolve (root, "secret-key", NULL);
-        if (secret_key && strlen (secret_key) == 40) {
-            Z85_decode (self->secret_key, secret_key);
-            matches++;
-        }
-        char *public_key = zconfig_resolve (root, "public-key", NULL);
-        if (public_key && strlen (public_key) == 40) {
-            Z85_decode (self->public_key, public_key);
-            matches++;
-        }
+    assert (self);
+    assert (name);
+    char *value = zhash_lookup (self->hash, name);
+    if (value && strlen (value) == 81) {
+        value = strdup (value);
+        value [40] = 0;
+        byte public_key [32];
+        byte secret_key [32];
+        curve_z85_decode (public_key, value);
+        curve_z85_decode (secret_key, value + 41);
+        free (value);
+        curve_keypair_t *keypair = curve_keypair_new_from (public_key, secret_key);
+        return keypair;
     }
-    if (matches != 2)
-        curve_keypair_destroy (&self);
-    zconfig_destroy (&root);
-    return self;
-}
-
-
-//  --------------------------------------------------------------------------
-//  Return public part of key pair
-
-byte *
-curve_keypair_public (curve_keypair_t *self)
-{
-    assert (self);
-    return self->public_key;
-}
-    
-
-//  --------------------------------------------------------------------------
-//  Return secret part of key pair
-
-byte *
-curve_keypair_secret (curve_keypair_t *self)
-{
-    assert (self);
-    return self->secret_key;
+    else
+        return NULL;
 }
 
 
@@ -163,23 +148,38 @@ curve_keypair_secret (curve_keypair_t *self)
 //  Selftest
 
 void
-curve_keypair_test (bool verbose)
+curve_keystore_test (bool verbose)
 {
-    printf (" * curve_keypair: ");
+    printf (" * curve_keystore: ");
 
     //  @selftest
-    //  Generate new long-term key pair for our test server
-    //  The key pair will be stored in "secret.key"
-    curve_keypair_t *keypair = curve_keypair_new ();
-    int rc = curve_keypair_save (keypair);
+    curve_keystore_t *keystore = curve_keystore_new ();
+    curve_keypair_t *client_keypair = curve_keypair_new ();
+    assert (client_keypair);
+    curve_keystore_put (keystore, "client", client_keypair);
+    curve_keypair_t *server_keypair = curve_keypair_new ();
+    assert (server_keypair);
+    curve_keystore_put (keystore, "server", server_keypair);
+    int rc = curve_keystore_save (keystore, ".keystore");
     assert (rc == 0);
-    assert (zfile_exists ("secret.key"));
-    assert (curve_keypair_secret (keypair));
-    assert (curve_keypair_public (keypair));
-    curve_keypair_destroy (&keypair);
+    assert (zfile_exists (".keystore"));
+    curve_keypair_destroy (&client_keypair);
+    curve_keypair_destroy (&server_keypair);
+    curve_keystore_destroy (&keystore);
+    
+    keystore = curve_keystore_new ();
+    rc = curve_keystore_load (keystore, ".keystore");
+    assert (rc == 0);
+    client_keypair = curve_keystore_get (keystore, "client");
+    assert (client_keypair);
+    server_keypair = curve_keystore_get (keystore, "server");
+    assert (server_keypair);
+    curve_keypair_destroy (&client_keypair);
+    curve_keypair_destroy (&server_keypair);
+    curve_keystore_destroy (&keystore);
+    
     //  Done, clean-up
-    zfile_delete ("public.key");
-    zfile_delete ("secret.key");
+//     zfile_delete (".keystore");
     //  @end
     
     printf ("OK\n");
