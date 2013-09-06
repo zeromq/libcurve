@@ -47,10 +47,10 @@ CZMQ_EXPORT curve_codec_t *
 CZMQ_EXPORT void
     curve_codec_destroy (curve_codec_t **self_p);
 
-//  Set permanent keypair for this codec; takes ownership of keypair and
+//  Set permanent keys for this codec; takes ownership of keypair and
 //  destroys when destroying the codec.
 CZMQ_EXPORT void
-    curve_codec_set_permakey (curve_codec_t *self, curve_keypair_t *keypair);
+    curve_codec_set_permanent_keys (curve_codec_t *self, curve_keypair_t *keypair);
 
 //  Set a metadata property; these are sent to the peer after the
 //  security handshake. Property values are strings.

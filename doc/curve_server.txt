@@ -1,0 +1,48 @@
+curve_server(3)
+===============
+
+NAME
+----
+curve_server - Curve-secured socket
+
+SYNOPSIS
+--------
+----
+//  Create a new curve_socket instance
+CZMQ_EXPORT curve_socket_t *
+    curve_socket_new (void);
+
+//  Destructor
+CZMQ_EXPORT void
+    curve_socket_destroy (curve_socket_t **self_p);
+    
+//  Get socket handle, for polling
+CZMQ_EXPORT void *
+    curve_socket_handle (curve_socket_t *self);
+
+//  Self test of this class
+void
+    curve_socket_test (bool verbose);
+----
+
+DESCRIPTION
+-----------
+
+Implements the client and server sockets. This class encodes and decodes
+zframes. All I/O is the responsibility of the caller. This is the 
+reference implementation of CurveZMQ. You will not normally want to use
+it directly in application code as the API is low-level and complex.
+TODO: authentication via ZAP - http://rfc.zeromq.org/spec:27/ZAP
+
+
+EXAMPLE
+-------
+.From curve_server_test method
+----
+    curve_socket_t *curve = curve_socket_new ();
+    curve_socket_destroy (&curve);
+----
+
+SEE ALSO
+--------
+linkczmq:czmq[7]

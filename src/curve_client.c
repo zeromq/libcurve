@@ -69,14 +69,11 @@ typedef enum {
 //  Structure of our class
 struct _curve_codec_t {
     curve_keypair_t
-        *permakey;              //  Our permanent key
+        *permanent;             //  Our permanent key
     curve_keypair_t
-        *transkey;              //  Our transient key
+        *transient;             //  Our transient key
     byte precomputed [32];      //  Precomputed key
-
-    //  At some point we have to know the public keys for our peer
-    byte peer_permakey [32];    //  Permanent public key for peer
-    byte peer_transkey [32];    //  Transient public key for peer
+    byte peer_transient [32];   //  Peer transient public key
 
     bool verbose;               //  Trace activity to stdout
     state_t state;              //  Current codec state
@@ -92,9 +89,11 @@ struct _curve_codec_t {
     
     //  Server connection properties
     byte cookie_key [32];       //  Server cookie key
+    byte client_key [32];       //  Client permanent public key
     
     //  Client connection properties
     byte cookie [96];           //  Cookie from server
+    byte server_key [32];       //  Server permanent public key
 };
 
 //  Command structures
@@ -144,11 +143,10 @@ curve_codec_new_client (byte *server_key)
 {
     curve_codec_t *self = (curve_codec_t *) zmalloc (sizeof (curve_codec_t));
     assert (self);
-    memcpy (self->peer_permakey, server_key, 32);
+    memcpy (self->server_key, server_key, 32);
     self->is_server = false;
     self->state = send_hello;
-    //  Create new transient keypair immediately
-    self->transkey = curve_keypair_new ();
+    self->transient = curve_keypair_new ();
     return self;
 }
 
@@ -164,9 +162,9 @@ curve_codec_new_server (void)
     assert (self);
     self->is_server = true;
     self->state = expect_hello;
-    //  We don't generate a transient keypair yet because that uses up 
-    //  entropy so would allow unauthenticated clients to do a 
-    //  Denial-of-Entropy attack.
+    //  We don't generate transient keys yet because that uses up entropy 
+    //  so would allow unauthenticated clients to do a Denial-of-Entropy
+    //  attack.
     return self;
 }
 
@@ -180,8 +178,8 @@ curve_codec_destroy (curve_codec_t **self_p)
     assert (self_p);
     if (*self_p) {
         curve_codec_t *self = *self_p;
-        curve_keypair_destroy (&self->permakey);
-        curve_keypair_destroy (&self->transkey);
+        curve_keypair_destroy (&self->permanent);
+        curve_keypair_destroy (&self->transient);
         free (self);
         *self_p = NULL;
     }
@@ -189,15 +187,14 @@ curve_codec_destroy (curve_codec_t **self_p)
 
 
 //  --------------------------------------------------------------------------
-//  Set permanent key pair for this codec; takes ownership of keypair and
+//  Set permanent keys for this codec; takes ownership of keypair and
 //  destroys when destroying the codec.
 
 void
-curve_codec_set_permakey (curve_codec_t *self, curve_keypair_t *keypair)
+curve_codec_set_permanent_keys (curve_codec_t *self, curve_keypair_t *keypair)
 {
     assert (self);
-    assert (keypair);
-    self->permakey = keypair;
+    self->permanent = keypair;
 }
 
 
@@ -375,13 +372,13 @@ s_produce_hello (curve_codec_t *self)
     hello_t *hello = (hello_t *) zframe_data (command);
     memcpy (hello->id, "\x05HELLO", 6);
 
-    memcpy (hello->client, curve_keypair_public (self->transkey), 32);
+    memcpy (hello->client, curve_keypair_public (self->transient), 32);
     byte signature [64] = { 0 };
     s_encrypt (self, hello->nonce, 
                signature, 64,
                "CurveZMQHELLO---", 
-               self->peer_permakey,     //  Server public key 
-               curve_keypair_secret (self->transkey));
+               self->server_key, 
+               curve_keypair_secret (self->transient));
     return command;
 }
 
@@ -390,14 +387,14 @@ s_process_hello (curve_codec_t *self, zframe_t *input)
 {
     hello_t *hello = (hello_t *) zframe_data (input);
 
-    memcpy (self->peer_transkey, hello->client, 32);
+    memcpy (self->peer_transient, hello->client, 32);
     byte signature_received [64];
     byte signature_expected [64] = { 0 };
     s_decrypt (self, hello->nonce, 
                signature_received, 64, 
                "CurveZMQHELLO---", 
                hello->client, 
-               curve_keypair_secret (self->permakey));
+               curve_keypair_secret (self->permanent));
     
     if (memcmp (signature_received, signature_expected, 64))
         s_set_error (self, "Invalid signature received from client");
@@ -415,13 +412,13 @@ s_produce_welcome (curve_codec_t *self)
     byte plain [128];           //  Space for baking our cookies
 
     //  Client is authenticated, so it's safe to generate a transient keypair
-    self->transkey = curve_keypair_new ();
+    self->transient = curve_keypair_new ();
 
     //  Generate cookie = Box [C' + s'](t),
     memset (plain, 0, crypto_box_ZEROBYTES);
-    memcpy (plain + crypto_box_ZEROBYTES, self->peer_transkey, 32);
+    memcpy (plain + crypto_box_ZEROBYTES, self->peer_transient, 32);
     memcpy (plain + crypto_box_ZEROBYTES + 32, 
-            curve_keypair_secret (self->transkey), 32);
+            curve_keypair_secret (self->transient), 32);
 
     //  Create full nonce for encryption
     //  8-byte prefix plus 16-byte random nonce
@@ -438,14 +435,14 @@ s_produce_welcome (curve_codec_t *self)
     assert (rc == 0);
 
     //  Create Box [S' + cookie](S->C')
-    memcpy (plain, curve_keypair_public (self->transkey), 32);
+    memcpy (plain, curve_keypair_public (self->transient), 32);
     memcpy (plain + 32, cookie_nonce, 16);
     memcpy (plain + 48, cookie_box + crypto_box_BOXZEROBYTES, 80);
     s_encrypt (self, welcome->nonce, 
                plain, 128, 
                "WELCOME-", 
-               self->peer_transkey, 
-               curve_keypair_secret (self->permakey));
+               self->peer_transient, 
+               curve_keypair_secret (self->permanent));
 
     return command;
 }
@@ -458,20 +455,19 @@ s_process_welcome (curve_codec_t *self, zframe_t *input)
     welcome_t *welcome = (welcome_t *) zframe_data (input);
     s_decrypt (self, welcome->nonce, 
                plain, 128, "WELCOME-", 
-               self->peer_permakey,     //  Server public key
-               curve_keypair_secret (self->transkey));
-    memcpy (self->peer_transkey, plain, 32);
+               self->server_key, 
+               curve_keypair_secret (self->transient));
+    memcpy (self->peer_transient, plain, 32);
     memcpy (self->cookie, plain + 32, 96);
 }
 
 //  Pre-compute connection secret from peer's transient key
-
 static void
 s_precompute_key (curve_codec_t *self)
 {
     int rc = crypto_box_beforenm (self->precomputed,
-                                  self->peer_transkey,
-                                  curve_keypair_secret (self->transkey));
+                                  self->peer_transient,
+                                  curve_keypair_secret (self->transient));
     assert (rc == 0);
 }
 
@@ -486,10 +482,10 @@ s_produce_initiate (curve_codec_t *self)
     //  Create vouch = Box [C'](C->S)
     byte vouch [64];
     s_encrypt (self, vouch, 
-               curve_keypair_public (self->transkey), 32, 
+               curve_keypair_public (self->transient), 32, 
                "VOUCH---", 
-               self->peer_permakey,     //  Server public key 
-               curve_keypair_secret (self->permakey));
+               self->server_key, 
+               curve_keypair_secret (self->permanent));
     
     //  Working variables for crypto calls
     size_t box_size = 96 + self->metadata_size;
@@ -497,7 +493,7 @@ s_produce_initiate (curve_codec_t *self)
     byte *box = malloc (box_size);
 
     //  Create Box [C + vouch + metadata](C'->S')
-    memcpy (plain, curve_keypair_public (self->permakey), 32);
+    memcpy (plain, curve_keypair_public (self->permanent), 32);
     memcpy (plain + 32, vouch, 64);
     memcpy (plain + 96, self->metadata, self->metadata_size);
     s_encrypt (self, initiate->nonce, 
@@ -537,11 +533,11 @@ s_process_initiate (curve_codec_t *self, zframe_t *input)
     memset (self->cookie_key, 0, 32);
     if (rc == 0) {
         //  Check cookie plain text is as expected [C' + s']
-        if (memcmp (plain + crypto_box_ZEROBYTES, self->peer_transkey, 32))
+        if (memcmp (plain + crypto_box_ZEROBYTES, self->peer_transient, 32))
             s_set_error (self, "Cookie contents are not valid (client transient key)");
         else
         if (memcmp (plain + crypto_box_ZEROBYTES + 32, 
-                    curve_keypair_secret (self->transkey), 32))
+                    curve_keypair_secret (self->transient), 32))
             s_set_error (self, "Cookie contents are not valid (own transient key)");
     }
     else
@@ -555,7 +551,7 @@ s_process_initiate (curve_codec_t *self, zframe_t *input)
                 NULL, NULL);
     
     if (self->state != errored)
-        memcpy (self->peer_permakey, plain, 32);
+        memcpy (self->client_key, plain, 32);
         //  TODO: call ZAP handler to authenticate client key
     
     if (self->state != errored)
@@ -568,12 +564,12 @@ s_process_initiate (curve_codec_t *self, zframe_t *input)
         memcpy (vouch, plain + 32, 64);
         s_decrypt (self, vouch, 
                 plain, 32, "VOUCH---",
-                self->peer_permakey,    //  Client permanent key
-                curve_keypair_secret (self->permakey));
+                self->client_key, 
+                curve_keypair_secret (self->permanent));
     }
     if (self->state != errored) {
         //  What we decrypted must be the short term client public key
-        if (memcmp (plain, self->peer_transkey, 32))
+        if (memcmp (plain, self->peer_transient, 32))
             s_set_error (self, "Bad vouch received from client");
     }
     free (plain);
@@ -826,7 +822,7 @@ server_task (void *args)
     //  generated keypair file
     curve_codec_t *server = curve_codec_new_server ();
     curve_codec_set_verbose (server, (bool *) args);
-    curve_codec_set_permakey (server, curve_keypair_load ());
+    curve_codec_set_permanent_keys (server, curve_keypair_load ());
 
     //  Set some metadata properties
     curve_codec_set_metadata (server, "Server", "CURVEZMQ/curve_codec");
@@ -907,7 +903,7 @@ curve_codec_test (bool verbose)
     //  Create a new client instance using shared server key
     curve_codec_t *client = curve_codec_new_client (server_key);
     curve_codec_set_verbose (client, verbose);
-    curve_codec_set_permakey (client, curve_keypair_new ());
+    curve_codec_set_permanent_keys (client, curve_keypair_new ());
 
     //  Set some metadata properties
     curve_codec_set_metadata (client, "Client", "CURVEZMQ/curve_codec");
@@ -985,7 +981,7 @@ curve_codec_test (bool verbose)
     
     //  Some invalid operations to test exception handling
     curve_codec_t *server = curve_codec_new_server ();
-    curve_codec_set_permakey (server, curve_keypair_load ());
+    curve_codec_set_permanent_keys (server, curve_keypair_load ());
 
     curve_codec_execute (server, NULL);
     assert (curve_codec_errored (server));
