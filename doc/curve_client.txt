@@ -8,17 +8,26 @@ curve_client - Secure client socket
 SYNOPSIS
 --------
 ----
-//  Create a new curve_client instance
+//  Create a new client instance, providing its permanent keypair
 CZMQ_EXPORT curve_client_t *
-    curve_client_new (void);
+    curve_client_new (curve_keypair_t *keypair);
 
 //  Destructor
 CZMQ_EXPORT void
     curve_client_destroy (curve_client_t **self_p);
-    
-//  Create outgoing connection to server
+
+//  Set metadata property, to be sent to server on connect
 CZMQ_EXPORT void
-    curve_client_connect (curve_client_t *self, const char *endpoint);
+    curve_client_set_metadata (curve_client_t *self, char *name, char *format, ...);
+
+//  Create outgoing connection to server, providing server permanent
+//  public key
+CZMQ_EXPORT void
+    curve_client_connect (curve_client_t *self, char *endpoint, byte *server_key);
+
+//  Close outgoing connection to server
+CZMQ_EXPORT void
+    curve_client_disconnect (curve_client_t *self);
 
 //  Send message to server, takes ownership of message
 CZMQ_EXPORT int
@@ -40,19 +49,29 @@ void
 DESCRIPTION
 -----------
 
-Implements the client and server sockets. This class encodes and decodes
-zframes. All I/O is the responsibility of the caller. This is the 
-reference implementation of CurveZMQ. You will not normally want to use
-it directly in application code as the API is low-level and complex.
-TODO: authentication via ZAP - http://rfc.zeromq.org/spec:27/ZAP
+Implements a secure client socket, doing I/O in the background. This is
+a high-level class intended for applications. It wraps the curve_codec
+class, and runs it across a DEALER socket to connect to a curve_server
+socket at the other end.
 
 
 EXAMPLE
 -------
 .From curve_client_test method
 ----
-    curve_client_t *curve = curve_client_new ();
-    curve_client_destroy (&curve);
+    curve_keypair_t *client_keypair = curve_keypair_new ();
+    curve_client_t *client = curve_client_new (client_keypair);
+    curve_client_set_metadata (client, "Client", "CURVEZMQ/curve_client");
+    curve_client_set_metadata (client, "Identity", "E475DA11");
+    curve_keypair_destroy (&client_keypair);
+
+    curve_keypair_t *server_keypair = curve_keypair_new ();
+    curve_server_t *server = curve_server_new (server_keypair);
+    curve_server_set_metadata (server, "Server", "CURVEZMQ/curve_server");
+    curve_keypair_destroy (&server_keypair);
+
+    curve_client_destroy (&client);
+    curve_server_destroy (&server);
 ----
 
 SEE ALSO

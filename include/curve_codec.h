@@ -8,16 +8,16 @@
     This file is part of the Curve authentication and encryption library.
 
     This is free software; you can redistribute it and/or modify it under
-    the terms of the GNU Lesser General Public License as published by the 
-    Free Software Foundation; either version 3 of the License, or (at your 
+    the terms of the GNU Lesser General Public License as published by the
+    Free Software Foundation; either version 3 of the License, or (at your
     option) any later version.
 
     This software is distributed in the hope that it will be useful, but
     WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABIL-
-    ITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Lesser General 
+    ITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Lesser General
     Public License for more details.
 
-    You should have received a copy of the GNU Lesser General Public License 
+    You should have received a copy of the GNU Lesser General Public License
     along with this program. If not, see <http://www.gnu.org/licenses/>.
     =========================================================================
 */
@@ -33,16 +33,16 @@ extern "C" {
 typedef struct _curve_codec_t curve_codec_t;
 
 //  @interface
-//  Create a new curve_codec instance for a client that talks to one
-//  server identified by its public key.
+//  Create a new curve_codec client instance, providing permanent keypair
+//  for the client. Takes ownership of keypair.
 CZMQ_EXPORT curve_codec_t *
-    curve_codec_new_client (byte *server_key);
+    curve_codec_new_client (curve_keypair_t **keypair_p);
 
-//  Create a new curve_codec instance for a server that talks to a single
-//  client peer.
+//  Create a new curve_codec server instance, providing permanent keypair
+//  for the server. Takes ownership of keypair.
 CZMQ_EXPORT curve_codec_t *
-    curve_codec_new_server (void);
-    
+    curve_codec_new_server (curve_keypair_t **keypair_p);
+
 //  Destructor
 CZMQ_EXPORT void
     curve_codec_destroy (curve_codec_t **self_p);
@@ -63,9 +63,9 @@ CZMQ_EXPORT void
 
 //  Accept input command from peer. If the command is invalid, it is
 //  discarded silently. May return a blob to send to the peer, or NULL
-//  if there is nothing to send.
+//  if there is nothing to send. Takes ownership of input.
 CZMQ_EXPORT zframe_t *
-    curve_codec_execute (curve_codec_t *self, zframe_t *input);
+    curve_codec_execute (curve_codec_t *self, zframe_t **input_p);
 
 //  Encode clear-text message to peer. Returns a blob ready to send
 //  on the wire. Encodes frame 'more' property.
@@ -84,7 +84,7 @@ CZMQ_EXPORT bool
 //  Indicate whether codec hit a fatal error
 CZMQ_EXPORT bool
     curve_codec_errored (curve_codec_t *self);
-    
+
 //  Self test of this class
 void
     curve_codec_test (bool verbose);

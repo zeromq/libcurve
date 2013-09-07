@@ -44,14 +44,6 @@ CZMQ_EXPORT curve_keypair_t *
 CZMQ_EXPORT void
     curve_keypair_destroy (curve_keypair_t **self_p);
 
-//  Save key pair to disk
-CZMQ_EXPORT int
-    curve_keypair_save (curve_keypair_t *self);
-
-//  Constructor, load key pair from disk
-CZMQ_EXPORT curve_keypair_t *
-    curve_keypair_load (void);
-
 //  Return public part of key pair
 CZMQ_EXPORT byte *
     curve_keypair_public (curve_keypair_t *self);
@@ -59,6 +51,26 @@ CZMQ_EXPORT byte *
 //  Return secret part of key pair
 CZMQ_EXPORT byte *
     curve_keypair_secret (curve_keypair_t *self);
+
+//  Return copy of keypair
+CZMQ_EXPORT curve_keypair_t *
+    curve_keypair_dup (curve_keypair_t *self);
+
+//  Return true if two keypairs are identical
+CZMQ_EXPORT bool
+    curve_keypair_eq (curve_keypair_t *self, curve_keypair_t *compare);
+
+//  Print contents of keypair to stderr for debugging
+CZMQ_EXPORT void
+    curve_keypair_dump (curve_keypair_t *self);
+
+//  Send keypair over socket as two-part message
+CZMQ_EXPORT int
+    curve_keypair_send (curve_keypair_t *self, void *pipe);
+
+//  Receive keypair off socket, return new keypair or NULL if error
+CZMQ_EXPORT curve_keypair_t *
+    curve_keypair_recv (void *pipe);
 
 //  Self test of this class
 void

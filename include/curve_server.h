@@ -8,16 +8,16 @@
     This file is part of the Curve authentication and encryption library.
 
     This is free software; you can redistribute it and/or modify it under
-    the terms of the GNU Lesser General Public License as published by the 
-    Free Software Foundation; either version 3 of the License, or (at your 
+    the terms of the GNU Lesser General Public License as published by the
+    Free Software Foundation; either version 3 of the License, or (at your
     option) any later version.
 
     This software is distributed in the hope that it will be useful, but
     WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABIL-
-    ITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Lesser General 
+    ITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Lesser General
     Public License for more details.
 
-    You should have received a copy of the GNU Lesser General Public License 
+    You should have received a copy of the GNU Lesser General Public License
     along with this program. If not, see <http://www.gnu.org/licenses/>.
     =========================================================================
 */
@@ -33,27 +33,42 @@ extern "C" {
 typedef struct _curve_server_t curve_server_t;
 
 //  @interface
-//  Create a new curve_server instance
+//  Create a new server instance, providing its permanent keypair
 CZMQ_EXPORT curve_server_t *
-    curve_server_new (void);
+    curve_server_new (curve_keypair_t **keypair_p);
 
 //  Destructor
 CZMQ_EXPORT void
     curve_server_destroy (curve_server_t **self_p);
-    
+
+//  Set metadata property, will be sent to clients at connection
+CZMQ_EXPORT void
+    curve_server_set_metadata (curve_server_t *self, char *name, char *format, ...);
+
+//  Enable verbose tracing of commands and activity
+CZMQ_EXPORT void
+    curve_server_set_verbose (curve_server_t *self, bool verbose);
+
 //  Bind server socket to local endpoint
 CZMQ_EXPORT void
-    curve_server_bind (curve_server_t *self, const char *endpoint);
+    curve_server_bind (curve_server_t *self, char *endpoint);
+
+//  Unbind server socket from local endpoint, idempotent
+CZMQ_EXPORT void
+    curve_server_unbind (curve_server_t *self, char *endpoint);
+
+//  Wait for message from server
+CZMQ_EXPORT zmsg_t *
+    curve_server_recv (curve_server_t *self);
+
+//  Send message to server, takes ownership of message
+CZMQ_EXPORT int
+    curve_server_send (curve_server_t *self, zmsg_t **msg_p);
 
 //  Get socket handle, for polling
 CZMQ_EXPORT void *
     curve_server_handle (curve_server_t *self);
 
-//  Set metadata property, will be sent to clients at connection
-CZMQ_EXPORT void
-    curve_server_set_meta (curve_server_t *self, 
-                           const char *name, const char *format, ...);
-    
 //  Self test of this class
 void
     curve_server_test (bool verbose);
