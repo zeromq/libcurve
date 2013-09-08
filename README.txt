@@ -16,6 +16,8 @@ CurveZMQ creates encrypted sessions ("connections") between two peers using shor
 
 The design of CurveZMQ stays as close as possible to the security handshake of [CurveCP](http://curvecp.org), a protocol designed to run over UDP.
 
+NOTE: CurveCP, CurveZMQ and the Curve library are considered EXPERIMENTAL and NOT PROVEN FOR PRODUCTION USE. Like all new security protocols, the code needs review and time to be considered mature. USE AT YOUR OWN RISK. The authors make NO PROMISES or guarantees about the level of security this protocol or code offers you.
+
 ## Ownership and License
 
 Curve's contributors are listed in the AUTHORS file. It is held by the ZeroMQ organization at github.com. The authors of Curve grant you use of this software under the terms of the GNU Lesser General Public License (LGPL). For details see the files `COPYING` and `COPYING.LESSER` in this directory.
