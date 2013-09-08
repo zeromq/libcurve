@@ -214,7 +214,8 @@ typedef enum {
     waiting,                    //  Waiting for API to issue connect
     connecting,                 //  Connecting to server
     connected,                  //  Ready for messages
-    terminated                  //  Terminated by the API or error
+    exception,                  //  Failed due to some error
+    terminated                  //  Terminated by the API
 } state_t;
 
 //  This structure holds the context for our agent, so we can
@@ -305,7 +306,7 @@ s_agent_handle_pipe (agent_t *self)
             if (encrypted)
                 zframe_send (&encrypted, self->dealer, 0);
             else
-                self->state = terminated;
+                self->state = exception;
         }
     }
     else
@@ -337,7 +338,7 @@ s_agent_handle_dealer (agent_t *self)
                 self->state = connected;
         }
         else
-            self->state = terminated;
+            self->state = exception;
     }
     else
     if (self->state == connected) {
@@ -348,7 +349,7 @@ s_agent_handle_dealer (agent_t *self)
             zframe_send (&cleartext, self->pipe, flags);
         }
         else
-            self->state = terminated;
+            self->state = exception;
     }
     return 0;
 }
@@ -377,7 +378,7 @@ s_agent_task (void *args, zctx_t *ctx, void *pipe)
             if (zframe_send (&self->output, self->dealer, 0) == 0)
                 s_agent_handle_dealer (self);
             else
-                self->state = terminated;
+                self->state = exception;
         }
         else
         if (self->state == connected) {
@@ -392,7 +393,8 @@ s_agent_task (void *args, zctx_t *ctx, void *pipe)
             if (pollitems [1].revents & ZMQ_POLLIN)
                 s_agent_handle_dealer (self);
         }
-        if (self->state == terminated)
+        if (self->state == terminated
+        ||  self->state == exception)
             break;
     }
     //  Done, free all agent resources

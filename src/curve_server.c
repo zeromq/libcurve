@@ -1,6 +1,9 @@
 /*  =========================================================================
     curve_server - Secure server socket
 
+set_maxclients
+set_client_ttl
+
     -------------------------------------------------------------------------
     Copyright (c) 1991-2013 iMatix Corporation <www.imatix.com>
     Copyright other contributors as noted in the AUTHORS file.
@@ -177,11 +180,57 @@ curve_server_handle (curve_server_t *self)
 
 //  *************************    BACK END AGENT    *************************
 
+//  This section covers a single client connection
+
 typedef enum {
     waiting,                    //  Waiting for connection
     connected,                  //  Ready for messages
-    terminated                  //  Terminated by the API or error
+    exception                   //  Failed due to some error
 } state_t;
+
+typedef struct {
+    curve_codec_t *codec;       //  Client CurveZMQ codec
+    state_t state;              //  Current state
+    zframe_t *address;          //  Client address identity
+    zmsg_t *incoming;           //  Incoming message, if any
+    char *hashkey;              //  Key into clients hash
+} client_t;
+
+static client_t *
+client_new (curve_keypair_t *keypair, zframe_t *address)
+{
+    client_t *self = (client_t *) zmalloc (sizeof (client_t));
+    assert (self);
+    self->codec = curve_codec_new_server (&keypair);
+    self->state = waiting;
+    self->address = zframe_dup (address);
+    self->hashkey = zframe_strhex (address);
+    return self;
+}
+
+static void
+client_destroy (client_t **self_p)
+{
+    assert (self_p);
+    if (*self_p) {
+        client_t *self = *self_p;
+        curve_codec_destroy (&self->codec);
+        zframe_destroy (&self->address);
+        zmsg_destroy (&self->incoming);
+        free (self->hashkey);
+        free (self);
+        *self_p = NULL;
+    }
+}
+
+//  Callback when we remove client from 'clients' hash table
+static void
+client_free (void *argument)
+{
+    client_t *client = (client_t *) argument;
+    client_destroy (&client);
+}
+
 
 //  This structure holds the context for our agent, so we can
 //  pass that around cleanly to methods which need it
@@ -189,11 +238,12 @@ typedef enum {
 typedef struct {
     zctx_t *ctx;                //  CZMQ context
     void *pipe;                 //  Pipe back to application
-    state_t state;              //  Current socket state
-    curve_codec_t *codec;       //  Client CurveZMQ codec
     void *router;               //  ROUTER socket to server
-    zframe_t *sender;           //  Client who sent us last message
+    curve_keypair_t *keypair;   //  Server long term keypair
+    zhash_t *clients;           //  Clients known so far
+    bool terminated;            //  Agent terminated by API
 } agent_t;
+
 
 static agent_t *
 s_agent_new (zctx_t *ctx, void *pipe)
@@ -201,8 +251,9 @@ s_agent_new (zctx_t *ctx, void *pipe)
     agent_t *self = (agent_t *) zmalloc (sizeof (agent_t));
     self->ctx = ctx;
     self->pipe = pipe;
-    self->state = waiting;
     self->router = zsocket_new (ctx, ZMQ_ROUTER);
+    self->keypair = curve_keypair_recv (self->pipe);
+    self->clients = zhash_new ();
     return self;
 }
 
@@ -212,8 +263,8 @@ s_agent_destroy (agent_t **self_p)
     assert (self_p);
     if (*self_p) {
         agent_t *self = *self_p;
-        curve_codec_destroy (&self->codec);
-        zframe_destroy (&self->sender);
+        curve_keypair_destroy (&self->keypair);
+        zhash_destroy (&self->clients);
         free (self);
         *self_p = NULL;
     }
@@ -234,7 +285,7 @@ s_agent_handle_pipe (agent_t *self)
     if (streq (command, "SET")) {
         char *name = zmsg_popstr (request);
         char *value = zmsg_popstr (request);
-        curve_codec_set_metadata (self->codec, name, value);
+//         curve_codec_set_metadata (self->codec, name, value);
         free (name);
         free (value);
     }
@@ -254,30 +305,43 @@ s_agent_handle_pipe (agent_t *self)
     }
     else
     if (streq (command, "SEND")) {
-        //  Encrypt and send all frames of request
-        //  Each frame is a full ZMQ message with identity frame
-        while (zmsg_size (request)) {
-            zframe_t *cleartext = zmsg_pop (request);
-            if (zmsg_size (request))
-                zframe_set_more (cleartext, 1);
-            zframe_t *encrypted = curve_codec_encode (self->codec, &cleartext);
-            if (encrypted) {
-                zframe_send (&self->sender, self->router, ZFRAME_MORE + ZFRAME_REUSE);
-                zframe_send (&encrypted, self->router, 0);
+        //  First frame is client address (hashkey)
+        //  If caller sends unknown client address, we discard the message
+        //  For testing, we'll abort in this case, since it cannot happen
+        //  The assert disappears when we start to timeout clients...
+        char *hashkey = zmsg_popstr (request);
+        client_t *client = zhash_lookup (self->clients, hashkey);
+        free (hashkey);
+        if (client) {
+            //  Encrypt and send all frames of request
+            //  Each frame is a full ZMQ message with identity frame
+            while (zmsg_size (request)) {
+                zframe_t *cleartext = zmsg_pop (request);
+                if (zmsg_size (request))
+                    zframe_set_more (cleartext, 1);
+                zframe_t *encrypted = curve_codec_encode (client->codec, &cleartext);
+                if (encrypted) {
+                    zframe_send (&client->address, self->router, ZFRAME_MORE + ZFRAME_REUSE);
+                    zframe_send (&encrypted, self->router, 0);
+                }
+                else {
+                    puts ("S:FAILED TO ENCODE MESSAGE");
+                    client->state = exception;
+                }
             }
-            else
-                self->state = terminated;
         }
+        else
+            puts ("S: UNKNOWN CLIENT");
     }
     else
     if (streq (command, "VERBOSE")) {
         char *verbose = zmsg_popstr (request);
-        curve_codec_set_verbose (self->codec, *verbose == '1'? true: false);
+//         curve_codec_set_verbose (self->codec, *verbose == '1'? true: false);
         free (verbose);
     }
     else
     if (streq (command, "TERMINATE")) {
-        self->state = terminated;
+        self->terminated = true;
         zstr_send (self->pipe, "OK");
     }
     free (command);
@@ -290,34 +354,54 @@ s_agent_handle_pipe (agent_t *self)
 static int
 s_agent_handle_router (agent_t *self)
 {
-    zframe_destroy (&self->sender);
-    self->sender = zframe_recv (self->router);
+    zframe_t *address = zframe_recv (self->router);
+    char *hashkey = zframe_strhex (address);
+    client_t *client = zhash_lookup (self->clients, hashkey);
+    if (client == NULL) {
+        client = client_new (curve_keypair_dup (self->keypair), address);
+        zhash_insert (self->clients, hashkey, client);
+        zhash_freefn (self->clients, hashkey, client_free);
+    }
+    free (hashkey);
+    zframe_destroy (&address);
 
     //  If not yet connected, process one command frame
     //  We always read one request, and send one reply
-    if (self->state == waiting) {
+    if (client->state == waiting) {
         zframe_t *input = zframe_recv (self->router);
-        zframe_t *output = curve_codec_execute (self->codec, &input);
+        zframe_t *output = curve_codec_execute (client->codec, &input);
         if (output) {
-            zframe_send (&self->sender, self->router, ZFRAME_MORE + ZFRAME_REUSE);
+            zframe_send (&client->address, self->router, ZFRAME_MORE + ZFRAME_REUSE);
             zframe_send (&output, self->router, 0);
-            if (curve_codec_connected (self->codec))
-                self->state = connected;
+            if (curve_codec_connected (client->codec))
+                client->state = connected;
         }
-        else
-            self->state = terminated;
+        else {
+            puts ("S:FAILED TO DECODE COMMAND");
+            client->state = exception;
+        }
     }
     else
-    //  If connected, process one message
-    if (self->state == connected) {
+    //  If connected, process one message frame
+    //  We will queue message frames in the client until we get a
+    //  whole message ready to deliver up the pipe -- frames from
+    //  different clients will be randomly intermixed.
+    if (client->state == connected) {
         zframe_t *encrypted = zframe_recv (self->router);
-        zframe_t *cleartext = curve_codec_decode (self->codec, &encrypted);
+        zframe_t *cleartext = curve_codec_decode (client->codec, &encrypted);
         if (cleartext) {
-            int flags = zframe_more (cleartext)? ZFRAME_MORE: 0;
-            zframe_send (&cleartext, self->pipe, flags);
+            if (client->incoming == NULL)
+                client->incoming = zmsg_new ();
+            zmsg_add (client->incoming, cleartext);
+            if (!zframe_more (cleartext)) {
+                zmsg_pushstr (client->incoming, client->hashkey);
+                zmsg_send (&client->incoming, self->pipe);
+            }
         }
-        else
-            self->state = terminated;
+        else {
+            puts ("S:FAILED TO DECODE MESSAGE");
+            client->state = exception;
+        }
     }
     return 0;
 }
@@ -331,17 +415,12 @@ s_agent_task (void *args, zctx_t *ctx, void *pipe)
     if (!self)                  //  Interrupted
         return;
 
-    //  Create new server codec using keypair from API
-    curve_keypair_t *server_key = curve_keypair_recv (self->pipe);
-    self->codec = curve_codec_new_server (&server_key);
-    curve_codec_set_verbose (self->codec, true);
-
+    //  Always handle messages on both sockets
+    zmq_pollitem_t pollitems [] = {
+        { self->pipe, 0, ZMQ_POLLIN, 0 },
+        { self->router, 0, ZMQ_POLLIN, 0 },
+    };
     while (!zctx_interrupted) {
-        //  Always handle messages on both sockets
-        zmq_pollitem_t pollitems [] = {
-            { self->pipe, 0, ZMQ_POLLIN, 0 },
-            { self->router, 0, ZMQ_POLLIN, 0 },
-        };
         if (zmq_poll (pollitems, 2, -1) == -1)
             break;              //  Interrupted
 
@@ -350,7 +429,7 @@ s_agent_task (void *args, zctx_t *ctx, void *pipe)
         if (pollitems [1].revents & ZMQ_POLLIN)
             s_agent_handle_router (self);
 
-        if (self->state == terminated)
+        if (self->terminated)
             break;
     }
     //  Done, free all agent resources
@@ -364,8 +443,6 @@ s_agent_task (void *args, zctx_t *ctx, void *pipe)
 static void *
 client_task (void *args)
 {
-    bool verbose = *((bool *) args);
-
     //  This is the curve_codec client selftest, runs as background thread
     curve_keystore_t *keystore = curve_keystore_new ();
     int rc = curve_keystore_load (keystore, "test_keystore");
@@ -374,8 +451,7 @@ client_task (void *args)
     curve_keypair_t *client_keypair = curve_keystore_get (keystore, "client");
     curve_client_t *client = curve_client_new (&client_keypair);
     curve_client_set_metadata (client, "Client", "CURVEZMQ/curve_client");
-    curve_client_set_metadata (client, "Identity", "E475DA11");
-    curve_client_set_verbose (client, verbose);
+    curve_client_set_metadata (client, "Identity", "%d", randof (1000));
 
     curve_keypair_t *server_keypair = curve_keystore_get (keystore, "server");
     curve_client_connect (client, "tcp://127.0.0.1:9000", curve_keypair_public (server_keypair));
@@ -399,9 +475,6 @@ client_task (void *args)
     int count;
     int size = 0;
     for (count = 0; count < 18; count++) {
-        if (verbose)
-            printf ("Testing message of size=%d...\n", size);
-
         zframe_t *data = zframe_new (NULL, size);
         int byte_nbr;
         //  Set data to sequence 0...255 repeated
@@ -437,9 +510,12 @@ curve_server_test (bool verbose)
 {
     printf (" * curve_server: ");
 
-    //  We'll run the server as a background task, and the
-    //  client in this foreground thread.
-    zthread_new (client_task, &verbose);
+    //  We'll run a set of clients as background tasks, and the
+    //  server in this foreground thread. Don't pass verbose to
+    //  the clients as the results are unreadable.
+    int live_clients;
+    for (live_clients = 0; live_clients < 5; live_clients++)
+        zthread_new (client_task, NULL);
 
     //  @selftest
     curve_keystore_t *keystore = curve_keystore_new ();
@@ -453,15 +529,14 @@ curve_server_test (bool verbose)
     curve_server_bind (server, "tcp://*:9000");
     curve_keystore_destroy (&keystore);
 
-    bool finished = false;
-    while (!finished) {
+    while (live_clients > 0) {
         zmsg_t *msg = curve_server_recv (server);
-        if (memcmp (zframe_data (zmsg_first (msg)), "END", 3) == 0)
-            finished = true;
+        if (memcmp (zframe_data (zmsg_last (msg)), "END", 3) == 0)
+            live_clients--;
         curve_server_send (server, &msg);
     }
     curve_server_destroy (&server);
-    //  No other way to ensure client thread has exited before we do
+    //  No other way to ensure client threads have exited before we do
     zclock_sleep (100);
     //  @end
 
