@@ -242,6 +242,7 @@ typedef struct {
     curve_keypair_t *keypair;   //  Server long term keypair
     zhash_t *clients;           //  Clients known so far
     bool terminated;            //  Agent terminated by API
+    bool verbose;               //  Trace activity to stderr
 } agent_t;
 
 
@@ -336,7 +337,8 @@ s_agent_handle_pipe (agent_t *self)
     else
     if (streq (command, "VERBOSE")) {
         char *verbose = zmsg_popstr (request);
-//         curve_codec_set_verbose (self->codec, *verbose == '1'? true: false);
+        self->verbose = *verbose == '1'? true: false;
+        // TODO
         free (verbose);
     }
     else
@@ -359,6 +361,7 @@ s_agent_handle_router (agent_t *self)
     client_t *client = zhash_lookup (self->clients, hashkey);
     if (client == NULL) {
         client = client_new (curve_keypair_dup (self->keypair), address);
+        curve_codec_set_verbose (client->codec, self->verbose);
         zhash_insert (self->clients, hashkey, client);
         zhash_freefn (self->clients, hashkey, client_free);
     }
@@ -376,10 +379,8 @@ s_agent_handle_router (agent_t *self)
             if (curve_codec_connected (client->codec))
                 client->state = connected;
         }
-        else {
-            puts ("S:FAILED TO DECODE COMMAND");
+        else
             client->state = exception;
-        }
     }
     else
     //  If connected, process one message frame
@@ -398,11 +399,13 @@ s_agent_handle_router (agent_t *self)
                 zmsg_send (&client->incoming, self->pipe);
             }
         }
-        else {
-            puts ("S:FAILED TO DECODE MESSAGE");
+        else
             client->state = exception;
-        }
     }
+    //  If client is misbehaving, remove it
+    if (client->state == exception)
+        zhash_delete (self->clients, client->hashkey);
+
     return 0;
 }
 
@@ -514,7 +517,7 @@ curve_server_test (bool verbose)
     //  server in this foreground thread. Don't pass verbose to
     //  the clients as the results are unreadable.
     int live_clients;
-    for (live_clients = 0; live_clients < 5; live_clients++)
+    for (live_clients = 0; live_clients < 0; live_clients++)
         zthread_new (client_task, NULL);
 
     //  @selftest
@@ -527,7 +530,6 @@ curve_server_test (bool verbose)
     curve_server_set_metadata (server, "Server", "CURVEZMQ/curve_server");
     curve_server_set_verbose (server, verbose);
     curve_server_bind (server, "tcp://*:9000");
-    curve_keystore_destroy (&keystore);
 
     while (live_clients > 0) {
         zmsg_t *msg = curve_server_recv (server);
@@ -535,10 +537,25 @@ curve_server_test (bool verbose)
             live_clients--;
         curve_server_send (server, &msg);
     }
+
+    //  Try an invalid client/server combination
+    byte bad_server_key [32] = { 0 };
+    curve_keypair_t *unknown = curve_keypair_new ();
+    curve_client_t *client = curve_client_new (&unknown);
+    curve_client_connect (client, "tcp://127.0.0.1:9000", bad_server_key);
+    curve_client_sendstr (client, "Hello, World");
+
+    //  Expect no reply after 250msec
+    zmq_pollitem_t pollitems [] = {
+        { curve_client_handle (client), 0, ZMQ_POLLIN, 0 }
+    };
+    assert (zmq_poll (pollitems, 1, 250) == 0);
+
+    curve_keystore_destroy (&keystore);
     curve_server_destroy (&server);
-    //  No other way to ensure client threads have exited before we do
-    zclock_sleep (100);
     //  @end
 
+    //  Ensure client threads have exited before we do
+    zclock_sleep (100);
     printf ("OK\n");
 }

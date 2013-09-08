@@ -433,7 +433,6 @@ server_task (void *args)
     curve_codec_t *server = curve_codec_new_server (&server_keypair);
     assert (server);
     curve_codec_set_verbose (server, verbose);
-    curve_keystore_destroy (&keystore);
 
     //  Set some metadata properties
     curve_codec_set_metadata (server, "Server", "CURVEZMQ/curve_codec");
@@ -465,6 +464,7 @@ server_task (void *args)
         zframe_send (&sender, router, ZFRAME_MORE);
         zframe_send (&encrypted, router, 0);
     }
+    curve_keystore_destroy (&keystore);
     curve_codec_destroy (&server);
     zctx_destroy (&ctx);
     return NULL;
@@ -545,5 +545,7 @@ curve_client_test (bool verbose)
     curve_client_destroy (&client);
     //  @end
 
+    //  Ensure server thread has exited before we do
+    zclock_sleep (100);
     printf ("OK\n");
 }

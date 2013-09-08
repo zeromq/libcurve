@@ -355,6 +355,9 @@ s_decrypt (
     //  If we cannot open the box, it means it's been modified or is unauthentic
     if (rc == 0)
         memcpy (data, plain + crypto_box_ZEROBYTES, size);
+    else
+    if (self->verbose)
+        puts ("E: invalid box received, cannot open it");
 
     free (plain);
     free (box);
@@ -375,6 +378,7 @@ s_produce_hello (curve_codec_t *self)
                "CurveZMQHELLO---",
                self->peer_permakey,     //  Server public key
                curve_keypair_secret (self->transkey));
+
     return command;
 }
 
