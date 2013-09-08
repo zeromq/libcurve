@@ -11,27 +11,42 @@ SYNOPSIS
 //  Constructor, creates a new public/secret key pair
 CZMQ_EXPORT curve_keypair_t *
     curve_keypair_new (void);
-    
+//  Constructor, accepts public/secret key pair from caller
+CZMQ_EXPORT curve_keypair_t *
+    curve_keypair_new_from (byte *public_key, byte *secret_key);
+
 //  Destructor
 CZMQ_EXPORT void
     curve_keypair_destroy (curve_keypair_t **self_p);
 
-//  Save key pair to disk
-CZMQ_EXPORT int
-    curve_keypair_save (curve_keypair_t *self);
-
-//  Constructor, load key pair from disk
-CZMQ_EXPORT curve_keypair_t *
-    curve_keypair_load (void);
-
 //  Return public part of key pair
 CZMQ_EXPORT byte *
     curve_keypair_public (curve_keypair_t *self);
-    
+
 //  Return secret part of key pair
 CZMQ_EXPORT byte *
     curve_keypair_secret (curve_keypair_t *self);
-    
+
+//  Return copy of keypair
+CZMQ_EXPORT curve_keypair_t *
+    curve_keypair_dup (curve_keypair_t *self);
+
+//  Return true if two keypairs are identical
+CZMQ_EXPORT bool
+    curve_keypair_eq (curve_keypair_t *self, curve_keypair_t *compare);
+
+//  Print contents of keypair to stderr for debugging
+CZMQ_EXPORT void
+    curve_keypair_dump (curve_keypair_t *self);
+
+//  Send keypair over socket as two-part message
+CZMQ_EXPORT int
+    curve_keypair_send (curve_keypair_t *self, void *pipe);
+
+//  Receive keypair off socket, return new keypair or NULL if error
+CZMQ_EXPORT curve_keypair_t *
+    curve_keypair_recv (void *pipe);
+
 //  Self test of this class
 void
     curve_keypair_test (bool verbose);
@@ -47,18 +62,22 @@ EXAMPLE
 -------
 .From curve_keypair_test method
 ----
-    //  Generate new long-term key pair for our test server
-    //  The key pair will be stored in "secret.key"
     curve_keypair_t *keypair = curve_keypair_new ();
-    int rc = curve_keypair_save (keypair);
-    assert (rc == 0);
-    assert (zfile_exists ("secret.key"));
-    assert (curve_keypair_secret (keypair));
     assert (curve_keypair_public (keypair));
+    assert (curve_keypair_secret (keypair));
+
+    curve_keypair_t *shadow = curve_keypair_new_from (
+        curve_keypair_public (keypair),
+        curve_keypair_secret (keypair));
+    assert (curve_keypair_eq (keypair, shadow));
+    curve_keypair_destroy (&shadow);
+
+    shadow = curve_keypair_dup (keypair);
+    assert (curve_keypair_eq (keypair, shadow));
+    curve_keypair_destroy (&shadow);
+
     curve_keypair_destroy (&keypair);
-    //  Done, clean-up
-    zfile_delete ("public.key");
-    zfile_delete ("secret.key");
+
 ----
 
 SEE ALSO

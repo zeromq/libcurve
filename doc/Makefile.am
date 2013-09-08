@@ -1,5 +1,5 @@
 MAN1 =
-MAN3 = curve_codec.3 curve_keypair.3
+MAN3 = curve_keypair.3 curve_codec.3 curve_client.3 curve_server.3
 MAN7 = curve.7
 MAN_DOC = $(MAN1) $(MAN3) $(MAN7)
 

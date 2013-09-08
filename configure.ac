@@ -251,5 +251,5 @@ AC_TYPE_SIGNAL
 AC_CHECK_FUNCS(perror gettimeofday memset getifaddrs freeifaddrs)
 
 # Specify output files
-AC_CONFIG_FILES([Makefile src/Makefile doc/Makefile src/libcurve.pc])
+AC_CONFIG_FILES([Makefile src/Makefile doc/Makefile src/libcurve.pc tools/Makefile])
 AC_OUTPUT

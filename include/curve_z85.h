@@ -1,5 +1,5 @@
 /*  =========================================================================
-    curve.h - Curve public interface
+    curve_z85 - Z85 encoding and decoding, see 0MQ RFC 32
 
     -------------------------------------------------------------------------
     Copyright (c) 1991-2013 iMatix Corporation <www.imatix.com>
@@ -22,32 +22,35 @@
     =========================================================================
 */
 
-#ifndef __CURVE_H_INCLUDED__
-#define __CURVE_H_INCLUDED__
+#ifndef __CURVE_Z85_H_INCLUDED__
+#define __CURVE_Z85_H_INCLUDED__
 
-//  libcurve version macros for compile-time API detection
-
-#define CURVE_VERSION_MAJOR 1
-#define CURVE_VERSION_MINOR 0
-#define CURVE_VERSION_PATCH 0
-
-#define CURVE_MAKE_VERSION(major, minor, patch) \
-    ((major) * 10000 + (minor) * 100 + (patch))
-#define CURVE_VERSION \
-    CURVE_MAKE_VERSION(CURVE_VERSION_MAJOR, CURVE_VERSION_MINOR, CURVE_VERSION_PATCH)
-
-#include <czmq.h>
-#if CZMQ_VERSION < 10400
-#   error "libcurve needs CZMQ/1.4.0 or later"
+#ifdef __cplusplus
+extern "C" {
 #endif
 
-//  Classes in the API
+//  Opaque class structure
+typedef struct _curve_z85_t curve_z85_t;
 
-#include "curve_keypair.h"
-#include "curve_keystore.h"
-#include "curve_codec.h"
-#include "curve_client.h"
-#include "curve_server.h"
-#include "curve_z85.h"
+//  @interface
+//  Encode a binary frame as a string; destination string MUST be at least
+//  size * 5 / 4 bytes long. Returns dest. Size must be a multiple of 4.
+CZMQ_EXPORT char *
+    curve_z85_encode (char *dest, uint8_t *data, size_t size);
+    
+//  Decode an encoded string into a binary frame; dest must be at least
+//  strlen (string) * 4 / 5 bytes long. Returns dest. strlen (string) 
+//  must be a multiple of 5.
+CZMQ_EXPORT uint8_t *
+    curve_z85_decode (uint8_t *dest, char *string);
+    
+//  Self test of this class
+void
+    curve_z85_test (bool verbose);
+//  @end
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

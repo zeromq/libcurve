@@ -1,5 +1,5 @@
 /*  =========================================================================
-    curve_keypair - keypair management
+    curve_server - Secure server socket
 
     -------------------------------------------------------------------------
     Copyright (c) 1991-2013 iMatix Corporation <www.imatix.com>
@@ -22,59 +22,56 @@
     =========================================================================
 */
 
-#ifndef __CURVE_KEYPAIR_H_INCLUDED__
-#define __CURVE_KEYPAIR_H_INCLUDED__
+#ifndef __CURVE_SERVER_H_INCLUDED__
+#define __CURVE_SERVER_H_INCLUDED__
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 //  Opaque class structure
-typedef struct _curve_keypair_t curve_keypair_t;
+typedef struct _curve_server_t curve_server_t;
 
 //  @interface
-//  Constructor, creates a new public/secret key pair
-CZMQ_EXPORT curve_keypair_t *
-    curve_keypair_new (void);
-//  Constructor, accepts public/secret key pair from caller
-CZMQ_EXPORT curve_keypair_t *
-    curve_keypair_new_from (byte *public_key, byte *secret_key);
+//  Create a new server instance, providing its permanent keypair
+CZMQ_EXPORT curve_server_t *
+    curve_server_new (curve_keypair_t **keypair_p);
 
 //  Destructor
 CZMQ_EXPORT void
-    curve_keypair_destroy (curve_keypair_t **self_p);
+    curve_server_destroy (curve_server_t **self_p);
 
-//  Return public part of key pair
-CZMQ_EXPORT byte *
-    curve_keypair_public (curve_keypair_t *self);
-
-//  Return secret part of key pair
-CZMQ_EXPORT byte *
-    curve_keypair_secret (curve_keypair_t *self);
-
-//  Return copy of keypair
-CZMQ_EXPORT curve_keypair_t *
-    curve_keypair_dup (curve_keypair_t *self);
-
-//  Return true if two keypairs are identical
-CZMQ_EXPORT bool
-    curve_keypair_eq (curve_keypair_t *self, curve_keypair_t *compare);
-
-//  Print contents of keypair to stderr for debugging
+//  Set metadata property, will be sent to clients at connection
 CZMQ_EXPORT void
-    curve_keypair_dump (curve_keypair_t *self);
+    curve_server_set_metadata (curve_server_t *self, char *name, char *format, ...);
 
-//  Send keypair over socket as two-part message
+//  Enable verbose tracing of commands and activity
+CZMQ_EXPORT void
+    curve_server_set_verbose (curve_server_t *self, bool verbose);
+
+//  Bind server socket to local endpoint
+CZMQ_EXPORT void
+    curve_server_bind (curve_server_t *self, char *endpoint);
+
+//  Unbind server socket from local endpoint, idempotent
+CZMQ_EXPORT void
+    curve_server_unbind (curve_server_t *self, char *endpoint);
+
+//  Wait for message from server
+CZMQ_EXPORT zmsg_t *
+    curve_server_recv (curve_server_t *self);
+
+//  Send message to server, takes ownership of message
 CZMQ_EXPORT int
-    curve_keypair_send (curve_keypair_t *self, void *pipe);
+    curve_server_send (curve_server_t *self, zmsg_t **msg_p);
 
-//  Receive keypair off socket, return new keypair or NULL if error
-CZMQ_EXPORT curve_keypair_t *
-    curve_keypair_recv (void *pipe);
+//  Get socket handle, for polling
+CZMQ_EXPORT void *
+    curve_server_handle (curve_server_t *self);
 
 //  Self test of this class
 void
-    curve_keypair_test (bool verbose);
+    curve_server_test (bool verbose);
 //  @end
 
 #ifdef __cplusplus
