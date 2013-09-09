@@ -312,7 +312,7 @@ s_agent_handle_pipe (agent_t *self)
     else
     if (streq (command, "VERBOSE")) {
         char *verbose = zmsg_popstr (request);
-        curve_codec_set_verbose (self->codec, *verbose == '1'? true: false);
+        curve_codec_set_verbose (self->codec, *verbose == '1');
         free (verbose);
     }
     else
@@ -364,8 +364,9 @@ s_agent_task (void *args, zctx_t *ctx, void *pipe)
         return;
 
     //  Create new client codec using keypair from API
-    curve_keypair_t *client_key = curve_keypair_recv (self->pipe);
-    self->codec = curve_codec_new_client (&client_key);
+    curve_keypair_t *keypair = curve_keypair_recv (self->pipe);
+    self->codec = curve_codec_new_client (keypair);
+    curve_keypair_destroy (&keypair);
 
     while (!zctx_interrupted) {
         //  In waiting state we handle API commands one by one
@@ -428,10 +429,11 @@ server_task (void *args)
     curve_keystore_t *keystore = curve_keystore_new ();
     rc = curve_keystore_load (keystore, "test_keystore");
     assert (rc == 0);
-    curve_keypair_t *server_keypair = curve_keystore_get (keystore, "server");
-    assert (server_keypair);
-    curve_codec_t *server = curve_codec_new_server (&server_keypair);
+    curve_keypair_t *keypair = curve_keystore_get (keystore, "server");
+    assert (keypair);
+    curve_codec_t *server = curve_codec_new_server (keypair);
     assert (server);
+    curve_keypair_destroy (&keypair);
     curve_codec_set_verbose (server, verbose);
 
     //  Set some metadata properties

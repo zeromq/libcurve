@@ -140,16 +140,14 @@ typedef struct {
 //  for the client. Takes ownership of keypair.
 
 curve_codec_t *
-curve_codec_new_client (curve_keypair_t **keypair_p)
+curve_codec_new_client (curve_keypair_t *keypair)
 {
     curve_codec_t *self = (curve_codec_t *) zmalloc (sizeof (curve_codec_t));
     assert (self);
-    assert (keypair_p);
+    assert (keypair);
     self->is_server = false;
     self->state = send_hello;
-    self->permakey = *keypair_p;
-    //  We now own the keypair so nullify caller's reference
-    *keypair_p = NULL;
+    self->permakey = curve_keypair_dup (keypair);
     self->transkey = curve_keypair_new ();
     return self;
 }
@@ -160,16 +158,14 @@ curve_codec_new_client (curve_keypair_t **keypair_p)
 //  for the server. Takes ownership of keypair.
 
 curve_codec_t *
-curve_codec_new_server (curve_keypair_t **keypair_p)
+curve_codec_new_server (curve_keypair_t *keypair)
 {
     curve_codec_t *self = (curve_codec_t *) zmalloc (sizeof (curve_codec_t));
     assert (self);
-    assert (keypair_p);
+    assert (keypair);
     self->is_server = true;
     self->state = expect_hello;
-    self->permakey = *keypair_p;
-    //  We now own the keypair so nullify caller's reference
-    *keypair_p = NULL;
+    self->permakey = curve_keypair_dup (keypair);
     //  We don't generate a transient keypair yet because that uses
     //  up entropy so would allow unauthenticated clients to do a
     //  Denial-of-Entropy attack.
@@ -852,10 +848,11 @@ server_task (void *args)
     curve_keystore_t *keystore = curve_keystore_new ();
     rc = curve_keystore_load (keystore, "test_keystore");
     assert (rc == 0);
-    curve_keypair_t *server_keypair = curve_keystore_get (keystore, "server");
-    assert (server_keypair);
-    curve_codec_t *server = curve_codec_new_server (&server_keypair);
+    curve_keypair_t *keypair = curve_keystore_get (keystore, "server");
+    assert (keypair);
+    curve_codec_t *server = curve_codec_new_server (keypair);
     assert (server);
+    curve_keypair_destroy (&keypair);
     curve_codec_set_verbose (server, verbose);
 
     //  Set some metadata properties
@@ -923,9 +920,11 @@ curve_codec_test (bool verbose)
     assert (rc != -1);
 
     //  Create a new client instance
-    curve_keypair_t *client_keypair = curve_keystore_get (keystore, "client");
-    curve_codec_t *client = curve_codec_new_client (&client_keypair);
+    curve_keypair_t *keypair = curve_keystore_get (keystore, "client");
+    assert (keypair);
+    curve_codec_t *client = curve_codec_new_client (keypair);
     assert (client);
+    curve_keypair_destroy (&keypair);
     curve_codec_set_verbose (client, verbose);
 
     //  Set some metadata properties
@@ -1031,9 +1030,10 @@ curve_codec_test (bool verbose)
     curve_codec_destroy (&client);
 
     //  Some invalid operations to test exception handling
-    curve_keypair_t *unknown = curve_keypair_new ();
-    input = zframe_new (curve_keypair_public (unknown), 32);
-    curve_codec_t *server = curve_codec_new_server (&unknown);
+    keypair = curve_keypair_new ();
+    input = zframe_new (curve_keypair_public (keypair), 32);
+    curve_codec_t *server = curve_codec_new_server (keypair);
+    curve_keypair_destroy (&keypair);
     curve_codec_execute (server, &input);
     assert (curve_codec_exception (server));
     curve_codec_destroy (&server);

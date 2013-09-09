@@ -1,9 +1,6 @@
 /*  =========================================================================
     curve_server - Secure server socket
 
-set_maxclients
-set_client_ttl
-
     -------------------------------------------------------------------------
     Copyright (c) 1991-2013 iMatix Corporation <www.imatix.com>
     Copyright other contributors as noted in the AUTHORS file.
@@ -34,6 +31,9 @@ set_client_ttl
 @discuss
 @end
 */
+
+//  TODO: authenticate new clients via ZAP handler
+
 
 #include "../include/curve.h"
 
@@ -85,7 +85,7 @@ curve_server_destroy (curve_server_t **self_p)
 
 
 //  ---------------------------------------------------------------------
-//  Set metadata property, will be sent to servers at connection
+//  Set metadata property, will be sent to clients at connection
 
 void
 curve_server_set_metadata (curve_server_t *self, char *name, char *format, ...)
@@ -113,6 +113,54 @@ curve_server_set_verbose (curve_server_t *self, bool verbose)
     assert (self);
     zstr_sendm (self->pipe, "VERBOSE");
     zstr_send  (self->pipe, "%d", verbose);
+}
+
+
+//  --------------------------------------------------------------------------
+//  Set maximum authenticated clients
+
+void
+curve_server_set_max_clients (curve_server_t *self, int limit)
+{
+    assert (self);
+    zstr_sendm (self->pipe, "MAX CLIENTS");
+    zstr_send  (self->pipe, "%d", limit);
+}
+
+
+//  --------------------------------------------------------------------------
+//  Set maximum unauthenticated pending clients
+
+void
+curve_server_set_max_pending (curve_server_t *self, int limit)
+{
+    assert (self);
+    zstr_sendm (self->pipe, "MAX PENDING");
+    zstr_send  (self->pipe, "%d", limit);
+}
+
+
+//  --------------------------------------------------------------------------
+//  Set time-to-live for authenticated clients
+
+void
+curve_server_set_client_ttl (curve_server_t *self, int limit)
+{
+    assert (self);
+    zstr_sendm (self->pipe, "CLIENT TTL");
+    zstr_send  (self->pipe, "%d", limit);
+}
+
+
+//  --------------------------------------------------------------------------
+//  Set time-to-live for unauthenticated pending clients
+
+void
+curve_server_set_pending_ttl (curve_server_t *self, int limit)
+{
+    assert (self);
+    zstr_sendm (self->pipe, "PENDING TTL");
+    zstr_send  (self->pipe, "%d", limit);
 }
 
 
@@ -180,15 +228,69 @@ curve_server_handle (curve_server_t *self)
 
 //  *************************    BACK END AGENT    *************************
 
+//  This structure holds the context for our agent, so we can
+//  pass that around cleanly to methods which need it
+
+typedef struct {
+    zctx_t *ctx;                //  CZMQ context
+    void *pipe;                 //  Pipe back to application
+    void *router;               //  ROUTER socket to server
+    curve_keypair_t *keypair;   //  Server long term keypair
+    size_t nbr_clients;         //  Number of authenticated clients
+    size_t nbr_pending;         //  Number of pending authentications
+    size_t max_clients;         //  Max authenticated clients
+    size_t max_pending;         //  Max pending authentications
+    size_t client_ttl;          //  Time-out for authenticated clients
+    size_t pending_ttl;         //  Time-out for pending authentications
+    zhash_t *metadata;          //  Metadata for server
+    zhash_t *clients;           //  Clients known so far
+    bool terminated;            //  Agent terminated by API
+    bool verbose;               //  Trace activity to stderr
+} agent_t;
+
+static agent_t *
+s_agent_new (zctx_t *ctx, void *pipe)
+{
+    agent_t *self = (agent_t *) zmalloc (sizeof (agent_t));
+    self->ctx = ctx;
+    self->pipe = pipe;
+    self->router = zsocket_new (ctx, ZMQ_ROUTER);
+    self->keypair = curve_keypair_recv (self->pipe);
+    self->metadata = zhash_new ();
+    zhash_autofree (self->metadata);
+    self->clients = zhash_new ();
+    self->max_clients = 100;
+    self->max_pending = 10;
+    self->client_ttl = 3600;    //  60 minutes
+    self->pending_ttl = 60;     //  60 seconds
+    return self;
+}
+
+static void
+s_agent_destroy (agent_t **self_p)
+{
+    assert (self_p);
+    if (*self_p) {
+        agent_t *self = *self_p;
+        curve_keypair_destroy (&self->keypair);
+        zhash_destroy (&self->metadata);
+        zhash_destroy (&self->clients);
+        free (self);
+        *self_p = NULL;
+    }
+}
+
+
 //  This section covers a single client connection
 
 typedef enum {
-    waiting,                    //  Waiting for connection
-    connected,                  //  Ready for messages
-    exception                   //  Failed due to some error
+    pending = 0,                //  Waiting for connection
+    connected = 1,              //  Ready for messages
+    exception = 2               //  Failed due to some error
 } state_t;
 
 typedef struct {
+    agent_t *agent;             //  Agent for this client
     curve_codec_t *codec;       //  Client CurveZMQ codec
     state_t state;              //  Current state
     zframe_t *address;          //  Client address identity
@@ -197,12 +299,12 @@ typedef struct {
 } client_t;
 
 static client_t *
-client_new (curve_keypair_t *keypair, zframe_t *address)
+client_new (agent_t *agent, zframe_t *address)
 {
     client_t *self = (client_t *) zmalloc (sizeof (client_t));
     assert (self);
-    self->codec = curve_codec_new_server (&keypair);
-    self->state = waiting;
+    self->agent = agent;
+    self->codec = curve_codec_new_server (agent->keypair);
     self->address = zframe_dup (address);
     self->hashkey = zframe_strhex (address);
     return self;
@@ -231,44 +333,39 @@ client_free (void *argument)
     client_destroy (&client);
 }
 
-
-//  This structure holds the context for our agent, so we can
-//  pass that around cleanly to methods which need it
-
-typedef struct {
-    zctx_t *ctx;                //  CZMQ context
-    void *pipe;                 //  Pipe back to application
-    void *router;               //  ROUTER socket to server
-    curve_keypair_t *keypair;   //  Server long term keypair
-    zhash_t *clients;           //  Clients known so far
-    bool terminated;            //  Agent terminated by API
-    bool verbose;               //  Trace activity to stderr
-} agent_t;
-
-
-static agent_t *
-s_agent_new (zctx_t *ctx, void *pipe)
+static void
+client_set_pending (client_t *self)
 {
-    agent_t *self = (agent_t *) zmalloc (sizeof (agent_t));
-    self->ctx = ctx;
-    self->pipe = pipe;
-    self->router = zsocket_new (ctx, ZMQ_ROUTER);
-    self->keypair = curve_keypair_recv (self->pipe);
-    self->clients = zhash_new ();
-    return self;
+    self->state = pending;
+    self->agent->nbr_pending++;
 }
 
 static void
-s_agent_destroy (agent_t **self_p)
+client_set_connected (client_t *self)
 {
-    assert (self_p);
-    if (*self_p) {
-        agent_t *self = *self_p;
-        curve_keypair_destroy (&self->keypair);
-        zhash_destroy (&self->clients);
-        free (self);
-        *self_p = NULL;
-    }
+    if (self->state == pending)
+        self->agent->nbr_pending--;
+    self->state = connected;
+    self->agent->nbr_clients++;
+}
+
+static void
+client_set_exception (client_t *self)
+{
+    if (self->state == pending)
+        self->agent->nbr_pending--;
+    else
+    if (self->state == connected)
+        self->agent->nbr_clients--;
+    self->state = exception;
+}
+
+static int
+client_set_metadata (const char *key, void *item, void *arg)
+{
+    client_t *self = (client_t *) arg;
+    curve_codec_set_metadata (self->codec, (char *) key, (char *) item);
+    return 0;
 }
 
 
@@ -286,9 +383,39 @@ s_agent_handle_pipe (agent_t *self)
     if (streq (command, "SET")) {
         char *name = zmsg_popstr (request);
         char *value = zmsg_popstr (request);
-//         curve_codec_set_metadata (self->codec, name, value);
+        zhash_insert (self->metadata, name, value);
         free (name);
         free (value);
+    }
+    else
+    if (streq (command, "VERBOSE")) {
+        char *verbose = zmsg_popstr (request);
+        self->verbose = *verbose == '1';
+        free (verbose);
+    }
+    else
+    if (streq (command, "MAX CLIENTS")) {
+        char *limit = zmsg_popstr (request);
+        self->max_clients = atoi (limit);
+        free (limit);
+    }
+    else
+    if (streq (command, "MAX PENDING")) {
+        char *limit = zmsg_popstr (request);
+        self->max_pending = atoi (limit);
+        free (limit);
+    }
+    else
+    if (streq (command, "CLIENT TTL")) {
+        char *limit = zmsg_popstr (request);
+        self->client_ttl = atoi (limit);
+        free (limit);
+    }
+    else
+    if (streq (command, "PENDING TTL")) {
+        char *limit = zmsg_popstr (request);
+        self->pending_ttl = atoi (limit);
+        free (limit);
     }
     else
     if (streq (command, "BIND")) {
@@ -325,21 +452,10 @@ s_agent_handle_pipe (agent_t *self)
                     zframe_send (&client->address, self->router, ZFRAME_MORE + ZFRAME_REUSE);
                     zframe_send (&encrypted, self->router, 0);
                 }
-                else {
-                    puts ("S:FAILED TO ENCODE MESSAGE");
-                    client->state = exception;
-                }
+                else
+                    client_set_exception (client);
             }
         }
-        else
-            puts ("S: UNKNOWN CLIENT");
-    }
-    else
-    if (streq (command, "VERBOSE")) {
-        char *verbose = zmsg_popstr (request);
-        self->verbose = *verbose == '1'? true: false;
-        // TODO
-        free (verbose);
     }
     else
     if (streq (command, "TERMINATE")) {
@@ -359,28 +475,37 @@ s_agent_handle_router (agent_t *self)
     zframe_t *address = zframe_recv (self->router);
     char *hashkey = zframe_strhex (address);
     client_t *client = zhash_lookup (self->clients, hashkey);
-    if (client == NULL) {
-        client = client_new (curve_keypair_dup (self->keypair), address);
+    if (client == NULL
+    && self->nbr_pending < self->max_pending) {
+        client = client_new (self, address);
+        client_set_pending (client);
         curve_codec_set_verbose (client->codec, self->verbose);
+        zhash_foreach (self->metadata, client_set_metadata, client);
         zhash_insert (self->clients, hashkey, client);
         zhash_freefn (self->clients, hashkey, client_free);
     }
     free (hashkey);
     zframe_destroy (&address);
 
+    //  If we're overloaded, discard client request without any further
+    //  ado. The client will have to detect this and retry later.
+    //  TODO: retry in client side to handle overloaded servers.
+    if (client == NULL)
+        return 0;
+
     //  If not yet connected, process one command frame
     //  We always read one request, and send one reply
-    if (client->state == waiting) {
+    if (client->state == pending) {
         zframe_t *input = zframe_recv (self->router);
         zframe_t *output = curve_codec_execute (client->codec, &input);
         if (output) {
             zframe_send (&client->address, self->router, ZFRAME_MORE + ZFRAME_REUSE);
             zframe_send (&output, self->router, 0);
             if (curve_codec_connected (client->codec))
-                client->state = connected;
+                client_set_connected (client);
         }
         else
-            client->state = exception;
+            client_set_exception (client);
     }
     else
     //  If connected, process one message frame
@@ -400,7 +525,7 @@ s_agent_handle_router (agent_t *self)
             }
         }
         else
-            client->state = exception;
+            client_set_exception (client);
     }
     //  If client is misbehaving, remove it
     if (client->state == exception)
@@ -517,7 +642,7 @@ curve_server_test (bool verbose)
     //  server in this foreground thread. Don't pass verbose to
     //  the clients as the results are unreadable.
     int live_clients;
-    for (live_clients = 0; live_clients < 0; live_clients++)
+    for (live_clients = 0; live_clients < 5; live_clients++)
         zthread_new (client_task, NULL);
 
     //  @selftest

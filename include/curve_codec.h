@@ -36,12 +36,12 @@ typedef struct _curve_codec_t curve_codec_t;
 //  Create a new curve_codec client instance, providing permanent keypair
 //  for the client. Takes ownership of keypair.
 CZMQ_EXPORT curve_codec_t *
-    curve_codec_new_client (curve_keypair_t **keypair_p);
+    curve_codec_new_client (curve_keypair_t *keypair);
 
 //  Create a new curve_codec server instance, providing permanent keypair
 //  for the server. Takes ownership of keypair.
 CZMQ_EXPORT curve_codec_t *
-    curve_codec_new_server (curve_keypair_t **keypair_p);
+    curve_codec_new_server (curve_keypair_t *keypair);
 
 //  Destructor
 CZMQ_EXPORT void
