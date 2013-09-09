@@ -1,8 +1,5 @@
 /*  =========================================================================
     curve_client - Secure client socket
-    TODO: allow multiple connects, each with own key
-        - maintain session for each one
-        - separate codec for each one
 
     -------------------------------------------------------------------------
     Copyright (c) 1991-2013 iMatix Corporation <www.imatix.com>
@@ -39,13 +36,14 @@
 
 //  Structure of our class
 struct _curve_client_t {
-    void *pipe;                 //  Pipe through to agent
+    void *control;              //  Control to/from agent
+    void *data;                 //  Data to/from agent
     zctx_t *ctx;                //  Private context
 };
 
 //  This background thread does all the real work
 static void
-    s_agent_task (void *args, zctx_t *ctx, void *pipe);
+    s_agent_task (void *args, zctx_t *ctx, void *control);
 
 
 //  --------------------------------------------------------------------------
@@ -60,9 +58,18 @@ curve_client_new (curve_keypair_t **keypair_p)
     curve_client_t *self = (curve_client_t *) zmalloc (sizeof (curve_client_t));
     assert (self);
     self->ctx = zctx_new ();
-    self->pipe = zthread_fork (self->ctx, s_agent_task, NULL);
-    curve_keypair_send (*keypair_p, self->pipe);
+    self->control = zthread_fork (self->ctx, s_agent_task, NULL);
+
+    //  Create separate data socket, send address on control socket
+    self->data = zsocket_new (self->ctx, ZMQ_PAIR);
+    assert (self->data);
+    int rc = zsocket_bind (self->data, "inproc://data-%p", self->data);
+    assert (rc != -1);
+    zstr_sendm (self->control, "inproc://data-%p", self->data);
+    //  Now send keypair on control socket as well
+    curve_keypair_send (*keypair_p, self->control);
     curve_keypair_destroy (keypair_p);
+
     return self;
 }
 
@@ -76,8 +83,8 @@ curve_client_destroy (curve_client_t **self_p)
     assert (self_p);
     if (*self_p) {
         curve_client_t *self = *self_p;
-        zstr_send (self->pipe, "TERMINATE");
-        free (zstr_recv (self->pipe));
+        zstr_send (self->control, "TERMINATE");
+        free (zstr_recv (self->control));
         zctx_destroy (&self->ctx);
         free (self);
         *self_p = NULL;
@@ -98,9 +105,9 @@ curve_client_set_metadata (curve_client_t *self, char *name, char *format, ...)
     vsnprintf (value, 255, format, argptr);
     va_end (argptr);
 
-    zstr_sendm (self->pipe, "SET");
-    zstr_sendm (self->pipe, name);
-    zstr_send  (self->pipe, value);
+    zstr_sendm (self->control, "SET");
+    zstr_sendm (self->control, name);
+    zstr_send  (self->control, value);
     free (value);
 }
 
@@ -112,8 +119,8 @@ void
 curve_client_set_verbose (curve_client_t *self, bool verbose)
 {
     assert (self);
-    zstr_sendm (self->pipe, "VERBOSE");
-    zstr_send  (self->pipe, "%d", verbose);
+    zstr_sendm (self->control, "VERBOSE");
+    zstr_send  (self->control, "%d", verbose);
 }
 
 
@@ -127,9 +134,9 @@ curve_client_connect (curve_client_t *self, char *endpoint, byte *server_key)
     assert (self);
     assert (endpoint);
     assert (server_key);
-    zstr_sendm (self->pipe, "CONNECT");
-    zstr_sendm (self->pipe, endpoint);
-    zmq_send (self->pipe, server_key, 32, 0);
+    zstr_sendm (self->control, "CONNECT");
+    zstr_sendm (self->control, endpoint);
+    zmq_send (self->control, server_key, 32, 0);
 }
 
 
@@ -140,8 +147,8 @@ void
 curve_client_disconnect (curve_client_t *self, char *endpoint)
 {
     assert (self);
-    zstr_sendm (self->pipe, "DISCONNECT");
-    zstr_send  (self->pipe, endpoint);
+    zstr_sendm (self->control, "DISCONNECT");
+    zstr_send  (self->control, endpoint);
 }
 
 
@@ -153,8 +160,7 @@ curve_client_send (curve_client_t *self, zmsg_t **msg_p)
 {
     assert (self);
     assert (zmsg_size (*msg_p) > 0);
-    zstr_sendm (self->pipe, "SEND");
-    zmsg_send (msg_p, self->pipe);
+    zmsg_send (msg_p, self->data);
     return 0;
 }
 
@@ -167,7 +173,7 @@ zmsg_t *
 curve_client_recv (curve_client_t *self)
 {
     assert (self);
-    zmsg_t *msg = zmsg_recv (self->pipe);
+    zmsg_t *msg = zmsg_recv (self->data);
     return msg;
 }
 
@@ -178,8 +184,7 @@ curve_client_recv (curve_client_t *self)
 int
 curve_client_sendstr (curve_client_t *self, char *string)
 {
-    zstr_sendm (self->pipe, "SEND");
-    zstr_send  (self->pipe, string);
+    zstr_send (self->data, string);
     return 0;
 }
 
@@ -191,12 +196,12 @@ char *
 curve_client_recvstr (curve_client_t *self)
 {
     assert (self);
-    return zstr_recv (self->pipe);
+    return zstr_recv (self->data);
 }
 
 
 //  --------------------------------------------------------------------------
-//  Get socket handle, for polling
+//  Get data socket handle, for polling
 //  NOTE: do not call send/recv directly on handle since internal message
 //  format is NOT A CONTRACT and is liable to change arbitrarily.
 
@@ -204,7 +209,7 @@ void *
 curve_client_handle (curve_client_t *self)
 {
     assert (self);
-    return self->pipe;
+    return self->data;
 }
 
 
@@ -223,23 +228,35 @@ typedef enum {
 
 typedef struct {
     zctx_t *ctx;                //  CZMQ context
-    void *pipe;                 //  Pipe back to application
+    void *control;              //  Control socket back to application
+    void *data;                 //  Data socket to application
     state_t state;              //  Current socket state
     curve_codec_t *codec;       //  Client CurveZMQ codec
     void *dealer;               //  DEALER socket to server
     char *endpoint;             //  Connected endpoint, if any
-    zframe_t *input;            //  Next input frame
-    zframe_t *output;           //  Next output frame
 } agent_t;
 
 static agent_t *
-s_agent_new (zctx_t *ctx, void *pipe)
+s_agent_new (zctx_t *ctx, void *control)
 {
     agent_t *self = (agent_t *) zmalloc (sizeof (agent_t));
     self->ctx = ctx;
-    self->pipe = pipe;
+    self->control = control;
     self->state = waiting;
     self->dealer = zsocket_new (ctx, ZMQ_DEALER);
+
+    //  Connect our data socket to caller's endpoint
+    self->data = zsocket_new (ctx, ZMQ_PAIR);
+    char *endpoint = zstr_recv (self->control);
+    int rc = zsocket_connect (self->data, endpoint);
+    assert (rc != -1);
+    free (endpoint);
+
+    //  Create new client codec using keypair from API
+    curve_keypair_t *keypair = curve_keypair_recv (self->control);
+    self->codec = curve_codec_new_client (keypair);
+    curve_keypair_destroy (&keypair);
+
     return self;
 }
 
@@ -251,8 +268,6 @@ s_agent_destroy (agent_t **self_p)
         agent_t *self = *self_p;
         free (self->endpoint);
         curve_codec_destroy (&self->codec);
-        zframe_destroy (&self->input);
-        zframe_destroy (&self->output);
         free (self);
         *self_p = NULL;
     }
@@ -262,10 +277,10 @@ s_agent_destroy (agent_t **self_p)
 //  Handle a control message from front-end API
 
 static int
-s_agent_handle_pipe (agent_t *self)
+s_agent_handle_control (agent_t *self)
 {
-    //  Get the whole message off the pipe in one go
-    zmsg_t *request = zmsg_recv (self->pipe);
+    //  Get the whole message off the control socket in one go
+    zmsg_t *request = zmsg_recv (self->control);
     char *command = zmsg_popstr (request);
     if (!command)
         return -1;                  //  Interrupted
@@ -284,7 +299,8 @@ s_agent_handle_pipe (agent_t *self)
         int rc = zsocket_connect (self->dealer, self->endpoint);
         assert (rc != -1);
         zframe_t *server_key = zmsg_pop (request);
-        self->output = curve_codec_execute (self->codec, &server_key);
+        zframe_t *output = curve_codec_execute (self->codec, &server_key);
+        zframe_send (&output, self->dealer, 0);
         self->state = connecting;
     }
     else
@@ -296,20 +312,6 @@ s_agent_handle_pipe (agent_t *self)
         }
     }
     else
-    if (streq (command, "SEND")) {
-        //  Encrypt and send all frames of request
-        while (zmsg_size (request)) {
-            zframe_t *cleartext = zmsg_pop (request);
-            if (zmsg_size (request))
-                zframe_set_more (cleartext, 1);
-            zframe_t *encrypted = curve_codec_encode (self->codec, &cleartext);
-            if (encrypted)
-                zframe_send (&encrypted, self->dealer, 0);
-            else
-                self->state = exception;
-        }
-    }
-    else
     if (streq (command, "VERBOSE")) {
         char *verbose = zmsg_popstr (request);
         curve_codec_set_verbose (self->codec, *verbose == '1');
@@ -318,26 +320,31 @@ s_agent_handle_pipe (agent_t *self)
     else
     if (streq (command, "TERMINATE")) {
         self->state = terminated;
-        zstr_send (self->pipe, "OK");
+        zstr_send (self->control, "OK");
+    }
+    else {
+        puts ("E: invalid command from API");
+        assert (false);
     }
     free (command);
     zmsg_destroy (&request);
     return 0;
 }
 
-//  Handle a message from the server
 
 static int
 s_agent_handle_dealer (agent_t *self)
 {
     if (self->state == connecting) {
-        self->input = zframe_recv (self->dealer);
-        if (self->input) {
-            self->output = curve_codec_execute (self->codec, &self->input);
-            if (curve_codec_connected (self->codec))
-                self->state = connected;
-        }
+        zframe_t *input = zframe_recv (self->dealer);
+        zframe_t *output = curve_codec_execute (self->codec, &input);
+        if (output)
+            zframe_send (&output, self->dealer, 0);
         else
+        if (curve_codec_connected (self->codec))
+            self->state = connected;
+        else
+        if (curve_codec_exception (self->codec))
             self->state = exception;
     }
     else
@@ -346,11 +353,32 @@ s_agent_handle_dealer (agent_t *self)
         zframe_t *cleartext = curve_codec_decode (self->codec, &encrypted);
         if (cleartext) {
             int flags = zframe_more (cleartext)? ZFRAME_MORE: 0;
-            zframe_send (&cleartext, self->pipe, flags);
+            zframe_send (&cleartext, self->data, flags);
         }
         else
             self->state = exception;
     }
+    return 0;
+}
+
+//  Handle a data message from front-end API
+
+static int
+s_agent_handle_data (agent_t *self)
+{
+    //  Encrypt and send all frames of request
+    zmsg_t *request = zmsg_recv (self->data);
+    while (zmsg_size (request)) {
+        zframe_t *cleartext = zmsg_pop (request);
+        if (zmsg_size (request))
+            zframe_set_more (cleartext, 1);
+        zframe_t *encrypted = curve_codec_encode (self->codec, &cleartext);
+        if (encrypted)
+            zframe_send (&encrypted, self->dealer, 0);
+        else
+            self->state = exception;
+    }
+    zmsg_destroy (&request);
     return 0;
 }
 
@@ -363,37 +391,24 @@ s_agent_task (void *args, zctx_t *ctx, void *pipe)
     if (!self)                  //  Interrupted
         return;
 
-    //  Create new client codec using keypair from API
-    curve_keypair_t *keypair = curve_keypair_recv (self->pipe);
-    self->codec = curve_codec_new_client (keypair);
-    curve_keypair_destroy (&keypair);
+    //  We have three sockets, but poll third one only selectively
+    zmq_pollitem_t pollitems [] = {
+        { self->control, 0, ZMQ_POLLIN, 0 },
+        { self->dealer, 0, ZMQ_POLLIN, 0 },
+        { self->data, 0, ZMQ_POLLIN, 0 }
+    };
 
     while (!zctx_interrupted) {
-        //  In waiting state we handle API commands one by one
-        if (self->state == waiting)
-            s_agent_handle_pipe (self);
-        else
-        //  In connecting state we send output and process input
-        if (self->state == connecting) {
-            assert (self->output);
-            if (zframe_send (&self->output, self->dealer, 0) == 0)
-                s_agent_handle_dealer (self);
-            else
-                self->state = exception;
-        }
-        else
-        if (self->state == connected) {
-            zmq_pollitem_t pollitems [] = {
-                { self->pipe, 0, ZMQ_POLLIN, 0 },
-                { self->dealer, 0, ZMQ_POLLIN, 0 },
-            };
-            if (zmq_poll (pollitems, 2, -1) == -1)
-                break;              //  Interrupted
-            if (pollitems [0].revents & ZMQ_POLLIN)
-                s_agent_handle_pipe (self);
-            if (pollitems [1].revents & ZMQ_POLLIN)
-                s_agent_handle_dealer (self);
-        }
+        int pollsize = self->state == connected? 3: 2;
+        if (zmq_poll (pollitems, pollsize, -1) == -1)
+            break;              //  Interrupted
+        if (pollitems [0].revents & ZMQ_POLLIN)
+            s_agent_handle_control (self);
+        if (pollitems [1].revents & ZMQ_POLLIN)
+            s_agent_handle_dealer (self);
+        if (pollitems [2].revents & ZMQ_POLLIN)
+            s_agent_handle_data (self);
+
         if (self->state == terminated
         ||  self->state == exception)
             break;

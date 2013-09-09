@@ -72,23 +72,22 @@ struct _curve_codec_t {
         *permakey;              //  Our permanent key
     curve_keypair_t
         *transkey;              //  Our transient key
-    byte precomputed [32];      //  Precomputed key
-
-    //  At some point we have to know the public keys for our peer
-    byte peer_permakey [32];    //  Permanent public key for peer
-    byte peer_transkey [32];    //  Transient public key for peer
 
     bool verbose;               //  Trace activity to stdout
     state_t state;              //  Current codec state
     int64_t nonce_counter;      //  Counter for short nonces
-
-    //  Metadata properties
-    //  TODO: use a zhash dictionary here
-    byte metadata [1000];       //  Encoded for the wire
-    size_t metadata_size;       //  Actual size so far
-
+    zhash_t *metadata_sent;     //  Metadata sent to peer
+    zhash_t *metadata_recd;     //  Metadata received from peer
+    byte *metadata_data;        //  Serialized metadata
+    size_t metadata_size;       //  Size of serialized metadata
+    size_t metadata_curr;       //  Size during serialization process
     bool is_server;             //  True for server-side codec
     char error_text [128];      //  In case of an error
+
+    //  At some point we have to know the public keys for our peer
+    byte peer_permakey [32];    //  Permanent public key for peer
+    byte peer_transkey [32];    //  Transient public key for peer
+    byte precomputed [32];      //  Precomputed transient key
 
     //  Server connection properties
     byte cookie_key [32];       //  Server cookie key
@@ -145,8 +144,14 @@ curve_codec_new_client (curve_keypair_t *keypair)
     curve_codec_t *self = (curve_codec_t *) zmalloc (sizeof (curve_codec_t));
     assert (self);
     assert (keypair);
+
     self->is_server = false;
     self->state = send_hello;
+
+    self->metadata_sent = zhash_new ();
+    zhash_autofree (self->metadata_sent);
+    self->metadata_recd = zhash_new ();
+    zhash_autofree (self->metadata_recd);
     self->permakey = curve_keypair_dup (keypair);
     self->transkey = curve_keypair_new ();
     return self;
@@ -163,8 +168,14 @@ curve_codec_new_server (curve_keypair_t *keypair)
     curve_codec_t *self = (curve_codec_t *) zmalloc (sizeof (curve_codec_t));
     assert (self);
     assert (keypair);
+
     self->is_server = true;
     self->state = expect_hello;
+
+    self->metadata_sent = zhash_new ();
+    zhash_autofree (self->metadata_sent);
+    self->metadata_recd = zhash_new ();
+    zhash_autofree (self->metadata_recd);
     self->permakey = curve_keypair_dup (keypair);
     //  We don't generate a transient keypair yet because that uses
     //  up entropy so would allow unauthenticated clients to do a
@@ -184,6 +195,9 @@ curve_codec_destroy (curve_codec_t **self_p)
         curve_codec_t *self = *self_p;
         curve_keypair_destroy (&self->permakey);
         curve_keypair_destroy (&self->transkey);
+        zhash_destroy (&self->metadata_sent);
+        zhash_destroy (&self->metadata_recd);
+        free (self->metadata_data);
         free (self);
         *self_p = NULL;
     }
@@ -199,29 +213,8 @@ curve_codec_set_metadata (curve_codec_t *self, char *name, char *value)
 {
     assert (self);
     assert (name && value);
-    size_t name_len = strlen (name);
-    size_t value_len = strlen (value);
-    assert (name_len > 0 && name_len < 256);
-    byte *needle = self->metadata + self->metadata_size;
-
-    //  Encode name
-    *needle++ = (byte) name_len;
-    memcpy (needle, name, name_len);
-    needle += name_len;
-
-    //  Encode value
-    *needle++ = (byte) ((value_len >> 24) && 255);
-    *needle++ = (byte) ((value_len >> 16) && 255);
-    *needle++ = (byte) ((value_len >> 8)  && 255);
-    *needle++ = (byte) ((value_len)       && 255);
-    memcpy (needle, value, value_len);
-    needle += value_len;
-
-    //  Update size of metadata so far
-    self->metadata_size = needle - self->metadata;
-    //  This is a throwaway implementation; a proper metadata design would use
-    //  a hash table and serialize to any size. TODO: rewrite this.
-    assert (self->metadata_size < 1000);
+    assert (strlen (name) > 0 && strlen (name) < 256);
+    zhash_insert (self->metadata_sent, name, value);
 }
 
 
@@ -313,8 +306,8 @@ s_encrypt (
 static int
 s_decrypt (
     curve_codec_t *self,    //  curve_codec instance sending the data
-    byte *source,           //  source must be nonce + box
-    byte *data,             //  Where to store decrypted clear text
+    byte *source,           //  Source must be nonce + box
+    byte *target,           //  Where to store decrypted clear text
     size_t size,            //  Size of clear text data
     char *prefix,           //  Nonce prefix to use, 8 or 16 chars
     byte *key_to,           //  Key to decrypt to, may be null
@@ -350,7 +343,7 @@ s_decrypt (
 
     //  If we cannot open the box, it means it's been modified or is unauthentic
     if (rc == 0)
-        memcpy (data, plain + crypto_box_ZEROBYTES, size);
+        memcpy (target, plain + crypto_box_ZEROBYTES, size);
     else
     if (self->verbose)
         puts ("E: invalid box received, cannot open it");
@@ -358,6 +351,97 @@ s_decrypt (
     free (plain);
     free (box);
     return rc;
+}
+
+static int
+s_count_total_size (const char *name, void *value, void *arg)
+{
+    curve_codec_t *self = (curve_codec_t *) arg;
+    self->metadata_size += strlen (name) + strlen ((char *) value) + 5;
+    return 0;
+}
+
+static int
+s_encode_property (const char *name, void *value, void *arg)
+{
+    curve_codec_t *self = (curve_codec_t *) arg;
+    byte *needle = self->metadata_data + self->metadata_curr;
+    size_t name_len = strlen (name);
+    size_t value_len = strlen ((char *) value);
+
+    //  Encode name
+    *needle++ = (byte) name_len;
+    memcpy (needle, (byte *) name, name_len);
+    needle += name_len;
+
+    //  Encode value
+    *needle++ = (byte) ((value_len >> 24) & 255);
+    *needle++ = (byte) ((value_len >> 16) & 255);
+    *needle++ = (byte) ((value_len >> 8)  & 255);
+    *needle++ = (byte) ((value_len)       & 255);
+    memcpy (needle, (byte *) value, value_len);
+    needle += value_len;
+
+    self->metadata_curr = needle - self->metadata_data;
+    return 0;
+}
+
+
+//  Encode self->metadata_sent into buffer ready to send
+
+static void
+s_encode_metadata (curve_codec_t *self)
+{
+    self->metadata_size = 0;
+    zhash_foreach (self->metadata_sent, s_count_total_size, self);
+    self->metadata_data = zmalloc (self->metadata_size);
+    self->metadata_curr = 0;
+    zhash_foreach (self->metadata_sent, s_encode_property, self);
+    assert (self->metadata_curr == self->metadata_size);
+}
+
+
+//  Decode metadata from provided buffer into self->metadata_recd
+
+static void
+s_decode_metadata (curve_codec_t *self, byte *data, size_t size)
+{
+    byte *needle = data;
+    byte *limit = data + size;
+
+    //  Each property uses at least six bytes
+    while (needle < limit - 6) {
+        size_t name_len;
+        size_t value_len;
+        name_len = *needle++;
+        if (needle + name_len > limit - 5)
+            break;      //  Invalid property, skip the rest
+
+        char *name = malloc (name_len + 1);
+        memcpy ((byte *) name, needle, name_len);
+        name [name_len] = 0;
+        needle += name_len;
+        //  Normalize name as all lower-case
+        char *char_ptr = name;
+        while (*char_ptr) {
+            *char_ptr = tolower (*char_ptr);
+            char_ptr++;
+        }
+
+        value_len = (needle [0] << 24)
+                  + (needle [1] << 16)
+                  + (needle [2] << 8)
+                  +  needle [3];
+        needle += 4;
+        char *value = malloc (value_len + 1);
+        memcpy ((byte *) value, needle, value_len);
+        value [value_len] = 0;
+        needle += value_len;
+
+        zhash_insert (self->metadata_recd, name, (char *) value);
+        free (name);
+        free (value);
+    }
 }
 
 static zframe_t *
@@ -386,8 +470,9 @@ s_process_hello (curve_codec_t *self, zframe_t *input)
 
     memcpy (self->peer_transkey, hello->client, 32);
     byte signature_received [64];
-    int rc = s_decrypt (
-        self, hello->nonce, signature_received, 64,
+    int rc = s_decrypt (self,
+        hello->nonce,
+        signature_received, 64,
         "CurveZMQHELLO---",
         hello->client,
         curve_keypair_secret (self->permakey));
@@ -449,8 +534,10 @@ s_process_welcome (curve_codec_t *self, zframe_t *input)
     //  Open Box [S' + cookie](C'->S)
     byte plain [128];
     welcome_t *welcome = (welcome_t *) zframe_data (input);
-    int rc = s_decrypt (
-        self, welcome->nonce, plain, 128, "WELCOME-",
+    int rc = s_decrypt (self,
+        welcome->nonce,
+        plain, 128,
+        "WELCOME-",
         self->peer_permakey,    //  Server public key
         curve_keypair_secret (self->transkey));
 
@@ -475,6 +562,8 @@ s_precompute_key (curve_codec_t *self)
 static zframe_t *
 s_produce_initiate (curve_codec_t *self)
 {
+    //  Create serialized metdata data buffer ready to send
+    s_encode_metadata (self);
     zframe_t *command = zframe_new (NULL, sizeof (initiate_t) + self->metadata_size);
     initiate_t *initiate = (initiate_t *) zframe_data (command);
     memcpy (initiate->id, "\x08INITIATE", 9);
@@ -496,7 +585,7 @@ s_produce_initiate (curve_codec_t *self)
     //  Create Box [C + vouch + metadata](C'->S')
     memcpy (plain, curve_keypair_public (self->permakey), 32);
     memcpy (plain + 32, vouch, 64);
-    memcpy (plain + 96, self->metadata, self->metadata_size);
+    memcpy (plain + 96, self->metadata_data, self->metadata_size);
     s_encrypt (self, initiate->nonce,
                plain, 96 + self->metadata_size,
                "CurveZMQINITIATE",
@@ -543,24 +632,26 @@ s_process_initiate (curve_codec_t *self, zframe_t *input)
     }
     if (rc == 0)
         //  Open Box [C + vouch + metadata](C'->S')
-        rc = s_decrypt (
-            self, initiate->nonce, plain, 96 + metadata_size,
-            "CurveZMQINITIATE", NULL, NULL);
+        rc = s_decrypt (self,
+            initiate->nonce,
+            plain, 96 + metadata_size,
+            "CurveZMQINITIATE",
+            NULL, NULL);
 
     if (rc == 0) {
         memcpy (self->peer_permakey, plain, 32);
         //  TODO: call ZAP handler to authenticate client key
     }
     if (rc == 0) {
-        //  Metadata is at plain + 96
-        //  TODO: load metadata into zhash for caller to access
-    }
-    if (rc == 0) {
+        s_decode_metadata (self, plain + 96, metadata_size);
+
         //  Vouch nonce + box is 64 bytes at plain + 32
         byte vouch [64];
         memcpy (vouch, plain + 32, 64);
-        int rc = s_decrypt (
-            self, vouch, plain, 32, "VOUCH---",
+        int rc = s_decrypt (self,
+            vouch,
+            plain, 32,
+            "VOUCH---",
             self->peer_permakey,    //  Client permanent key
             curve_keypair_secret (self->permakey));
 
@@ -576,11 +667,14 @@ s_process_initiate (curve_codec_t *self, zframe_t *input)
 static zframe_t *
 s_produce_ready (curve_codec_t *self)
 {
+    //  Create serialized metdata data buffer ready to send
+    s_encode_metadata (self);
+
     zframe_t *command = zframe_new (NULL, sizeof (ready_t) + self->metadata_size);
     ready_t *ready = (ready_t *) zframe_data (command);
     memcpy (ready->id, "\x05READY", 6);
     s_encrypt (self, ready->nonce,
-               self->metadata, self->metadata_size,
+               self->metadata_data, self->metadata_size,
                "CurveZMQREADY---",
                NULL, NULL);
     return command;
@@ -591,11 +685,18 @@ static int
 s_process_ready (curve_codec_t *self, zframe_t *input)
 {
     ready_t *ready = (ready_t *) zframe_data (input);
-    self->metadata_size = zframe_size (input) - sizeof (ready_t);
-    int rc = s_decrypt (
-        self, ready->nonce, self->metadata, self->metadata_size,
-        "CurveZMQREADY---", NULL, NULL);
+    size_t size = zframe_size (input) - sizeof (ready_t);
+    byte *plain = zmalloc (size);
 
+    int rc = s_decrypt (self,
+        ready->nonce,
+        plain, size,
+        "CurveZMQREADY---",
+        NULL, NULL);
+
+    //  Metadata comprises entire box
+    s_decode_metadata (self, plain, size);
+    free (plain);
     return rc;
 }
 
@@ -625,8 +726,9 @@ s_process_message (curve_codec_t *self, zframe_t *input)
     message_t *message = (message_t *) zframe_data (input);
     size_t clear_size = zframe_size (input) - sizeof (message_t);
     byte *clear_data = malloc (clear_size);
-    int rc = s_decrypt (
-        self, message->nonce, clear_data, clear_size,
+    int rc = s_decrypt (self,
+        message->nonce,
+        clear_data, clear_size,
         self->is_server? "CurveZMQMESSAGEC": "CurveZMQMESSAGES",
         NULL, NULL);
 
@@ -822,6 +924,20 @@ curve_codec_exception (curve_codec_t *self)
 
 
 //  --------------------------------------------------------------------------
+//  Returns metadata from peer, as a zhash table. The hash table remains
+//  owned by the codec and the caller should not use it after destroying
+//  the codec. Only valid after the peer has connected. NOTE: All keys
+//  in the hash table are lowercase.
+
+zhash_t *
+curve_codec_metadata (curve_codec_t *self)
+{
+    assert (self);
+    return (self->metadata_recd);
+}
+
+
+//  --------------------------------------------------------------------------
 //  Selftest
 
 //  @selftest
@@ -869,6 +985,11 @@ server_task (void *args)
         zframe_send (&sender, router, ZFRAME_MORE);
         zframe_send (&output, router, 0);
     }
+    //  Check client metadata
+    char *client_name = zhash_lookup (curve_codec_metadata (server), "client");
+    assert (client_name);
+    assert (streq (client_name, "CURVEZMQ/curve_codec"));
+
     bool finished = false;
     while (!finished) {
         //  Now act as echo service doing a full decode and encode

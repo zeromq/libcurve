@@ -39,13 +39,14 @@
 
 //  Structure of our class
 struct _curve_server_t {
-    void *pipe;                 //  Pipe through to agent
+    void *control;              //  Control to/from agent
+    void *data;                 //  Data to/from agent
     zctx_t *ctx;                //  Private context
 };
 
 //  This background thread does all the real work
 static void
-    s_agent_task (void *args, zctx_t *ctx, void *pipe);
+    s_agent_task (void *args, zctx_t *ctx, void *control);
 
 //  --------------------------------------------------------------------------
 //  Constructor
@@ -59,9 +60,18 @@ curve_server_new (curve_keypair_t **keypair_p)
     curve_server_t *self = (curve_server_t *) zmalloc (sizeof (curve_server_t));
     assert (self);
     self->ctx = zctx_new ();
-    self->pipe = zthread_fork (self->ctx, s_agent_task, NULL);
-    curve_keypair_send (*keypair_p, self->pipe);
+    self->control = zthread_fork (self->ctx, s_agent_task, NULL);
+
+    //  Create separate data socket, send address on control socket
+    self->data = zsocket_new (self->ctx, ZMQ_PAIR);
+    assert (self->data);
+    int rc = zsocket_bind (self->data, "inproc://data-%p", self->data);
+    assert (rc != -1);
+    zstr_sendm (self->control, "inproc://data-%p", self->data);
+    //  Now send keypair on control socket as well
+    curve_keypair_send (*keypair_p, self->control);
     curve_keypair_destroy (keypair_p);
+
     return self;
 }
 
@@ -75,8 +85,8 @@ curve_server_destroy (curve_server_t **self_p)
     assert (self_p);
     if (*self_p) {
         curve_server_t *self = *self_p;
-        zstr_send (self->pipe, "TERMINATE");
-        free (zstr_recv (self->pipe));
+        zstr_send (self->control, "TERMINATE");
+        free (zstr_recv (self->control));
         zctx_destroy (&self->ctx);
         free (self);
         *self_p = NULL;
@@ -97,9 +107,9 @@ curve_server_set_metadata (curve_server_t *self, char *name, char *format, ...)
     vsnprintf (value, 255, format, argptr);
     va_end (argptr);
 
-    zstr_sendm (self->pipe, "SET");
-    zstr_sendm (self->pipe, name);
-    zstr_send  (self->pipe, value);
+    zstr_sendm (self->control, "SET");
+    zstr_sendm (self->control, name);
+    zstr_send  (self->control, value);
     free (value);
 }
 
@@ -111,8 +121,8 @@ void
 curve_server_set_verbose (curve_server_t *self, bool verbose)
 {
     assert (self);
-    zstr_sendm (self->pipe, "VERBOSE");
-    zstr_send  (self->pipe, "%d", verbose);
+    zstr_sendm (self->control, "VERBOSE");
+    zstr_send  (self->control, "%d", verbose);
 }
 
 
@@ -123,8 +133,8 @@ void
 curve_server_set_max_clients (curve_server_t *self, int limit)
 {
     assert (self);
-    zstr_sendm (self->pipe, "MAX CLIENTS");
-    zstr_send  (self->pipe, "%d", limit);
+    zstr_sendm (self->control, "MAX CLIENTS");
+    zstr_send  (self->control, "%d", limit);
 }
 
 
@@ -135,8 +145,8 @@ void
 curve_server_set_max_pending (curve_server_t *self, int limit)
 {
     assert (self);
-    zstr_sendm (self->pipe, "MAX PENDING");
-    zstr_send  (self->pipe, "%d", limit);
+    zstr_sendm (self->control, "MAX PENDING");
+    zstr_send  (self->control, "%d", limit);
 }
 
 
@@ -147,8 +157,8 @@ void
 curve_server_set_client_ttl (curve_server_t *self, int limit)
 {
     assert (self);
-    zstr_sendm (self->pipe, "CLIENT TTL");
-    zstr_send  (self->pipe, "%d", limit);
+    zstr_sendm (self->control, "CLIENT TTL");
+    zstr_send  (self->control, "%d", limit);
 }
 
 
@@ -159,8 +169,8 @@ void
 curve_server_set_pending_ttl (curve_server_t *self, int limit)
 {
     assert (self);
-    zstr_sendm (self->pipe, "PENDING TTL");
-    zstr_send  (self->pipe, "%d", limit);
+    zstr_sendm (self->control, "PENDING TTL");
+    zstr_send  (self->control, "%d", limit);
 }
 
 
@@ -171,8 +181,8 @@ void
 curve_server_bind (curve_server_t *self, char *endpoint)
 {
     assert (self);
-    zstr_sendm (self->pipe, "BIND");
-    zstr_send  (self->pipe, endpoint);
+    zstr_sendm (self->control, "BIND");
+    zstr_send  (self->control, endpoint);
 }
 
 
@@ -183,8 +193,8 @@ void
 curve_server_unbind (curve_server_t *self, char *endpoint)
 {
     assert (self);
-    zstr_sendm (self->pipe, "UNBIND");
-    zstr_send  (self->pipe, endpoint);
+    zstr_sendm (self->control, "UNBIND");
+    zstr_send  (self->control, endpoint);
 }
 
 
@@ -196,7 +206,7 @@ zmsg_t *
 curve_server_recv (curve_server_t *self)
 {
     assert (self);
-    zmsg_t *msg = zmsg_recv (self->pipe);
+    zmsg_t *msg = zmsg_recv (self->data);
     return msg;
 }
 
@@ -209,20 +219,21 @@ curve_server_send (curve_server_t *self, zmsg_t **msg_p)
 {
     assert (self);
     assert (zmsg_size (*msg_p) > 0);
-    zstr_sendm (self->pipe, "SEND");
-    zmsg_send (msg_p, self->pipe);
+    zmsg_send (msg_p, self->data);
     return 0;
 }
 
 
 //  --------------------------------------------------------------------------
-//  Get socket handle, for polling
+//  Get data socket handle, for polling
+//  NOTE: do not call send/recv directly on handle since internal message
+//  format is NOT A CONTRACT and is liable to change arbitrarily.
 
 void *
 curve_server_handle (curve_server_t *self)
 {
     assert (self);
-    return self->pipe;
+    return self->data;
 }
 
 
@@ -233,7 +244,8 @@ curve_server_handle (curve_server_t *self)
 
 typedef struct {
     zctx_t *ctx;                //  CZMQ context
-    void *pipe;                 //  Pipe back to application
+    void *control;              //  Control socket back to application
+    void *data;                 //  Data socket to application
     void *router;               //  ROUTER socket to server
     curve_keypair_t *keypair;   //  Server long term keypair
     size_t nbr_clients;         //  Number of authenticated clients
@@ -249,13 +261,21 @@ typedef struct {
 } agent_t;
 
 static agent_t *
-s_agent_new (zctx_t *ctx, void *pipe)
+s_agent_new (zctx_t *ctx, void *control)
 {
     agent_t *self = (agent_t *) zmalloc (sizeof (agent_t));
     self->ctx = ctx;
-    self->pipe = pipe;
+    self->control = control;
     self->router = zsocket_new (ctx, ZMQ_ROUTER);
-    self->keypair = curve_keypair_recv (self->pipe);
+
+    //  Connect our data socket to caller's endpoint
+    self->data = zsocket_new (ctx, ZMQ_PAIR);
+    char *endpoint = zstr_recv (self->control);
+    int rc = zsocket_connect (self->data, endpoint);
+    assert (rc != -1);
+    free (endpoint);
+
+    self->keypair = curve_keypair_recv (self->control);
     self->metadata = zhash_new ();
     zhash_autofree (self->metadata);
     self->clients = zhash_new ();
@@ -372,10 +392,10 @@ client_set_metadata (const char *key, void *item, void *arg)
 //  Handle a control message from front-end API
 
 static int
-s_agent_handle_pipe (agent_t *self)
+s_agent_handle_control (agent_t *self)
 {
-    //  Get the whole message off the pipe in one go
-    zmsg_t *request = zmsg_recv (self->pipe);
+    //  Get the whole message off the control socket in one go
+    zmsg_t *request = zmsg_recv (self->control);
     char *command = zmsg_popstr (request);
     if (!command)
         return -1;                  //  Interrupted
@@ -432,35 +452,9 @@ s_agent_handle_pipe (agent_t *self)
         free (endpoint);
     }
     else
-    if (streq (command, "SEND")) {
-        //  First frame is client address (hashkey)
-        //  If caller sends unknown client address, we discard the message
-        //  For testing, we'll abort in this case, since it cannot happen
-        //  The assert disappears when we start to timeout clients...
-        char *hashkey = zmsg_popstr (request);
-        client_t *client = zhash_lookup (self->clients, hashkey);
-        free (hashkey);
-        if (client) {
-            //  Encrypt and send all frames of request
-            //  Each frame is a full ZMQ message with identity frame
-            while (zmsg_size (request)) {
-                zframe_t *cleartext = zmsg_pop (request);
-                if (zmsg_size (request))
-                    zframe_set_more (cleartext, 1);
-                zframe_t *encrypted = curve_codec_encode (client->codec, &cleartext);
-                if (encrypted) {
-                    zframe_send (&client->address, self->router, ZFRAME_MORE + ZFRAME_REUSE);
-                    zframe_send (&encrypted, self->router, 0);
-                }
-                else
-                    client_set_exception (client);
-            }
-        }
-    }
-    else
     if (streq (command, "TERMINATE")) {
         self->terminated = true;
-        zstr_send (self->pipe, "OK");
+        zstr_send (self->control, "OK");
     }
     free (command);
     zmsg_destroy (&request);
@@ -510,8 +504,8 @@ s_agent_handle_router (agent_t *self)
     else
     //  If connected, process one message frame
     //  We will queue message frames in the client until we get a
-    //  whole message ready to deliver up the pipe -- frames from
-    //  different clients will be randomly intermixed.
+    //  whole message ready to deliver up the data socket -- frames
+    //  from different clients will be randomly intermixed.
     if (client->state == connected) {
         zframe_t *encrypted = zframe_recv (self->router);
         zframe_t *cleartext = curve_codec_decode (client->codec, &encrypted);
@@ -521,7 +515,7 @@ s_agent_handle_router (agent_t *self)
             zmsg_add (client->incoming, cleartext);
             if (!zframe_more (cleartext)) {
                 zmsg_pushstr (client->incoming, client->hashkey);
-                zmsg_send (&client->incoming, self->pipe);
+                zmsg_send (&client->incoming, self->control);
             }
         }
         else
@@ -534,28 +528,64 @@ s_agent_handle_router (agent_t *self)
     return 0;
 }
 
+//  Handle a data message from front-end API
+
+static int
+s_agent_handle_data (agent_t *self)
+{
+    //  First frame is client address (hashkey)
+    //  If caller sends unknown client address, we discard the message
+    //  For testing, we'll abort in this case, since it cannot happen
+    //  The assert disappears when we start to timeout clients...
+    zmsg_t *request = zmsg_recv (self->data);
+    char *hashkey = zmsg_popstr (request);
+    client_t *client = zhash_lookup (self->clients, hashkey);
+    free (hashkey);
+    if (client) {
+        //  Encrypt and send all frames of request
+        //  Each frame is a full ZMQ message with identity frame
+        while (zmsg_size (request)) {
+            zframe_t *cleartext = zmsg_pop (request);
+            if (zmsg_size (request))
+                zframe_set_more (cleartext, 1);
+            zframe_t *encrypted = curve_codec_encode (client->codec, &cleartext);
+            if (encrypted) {
+                zframe_send (&client->address, self->router, ZFRAME_MORE + ZFRAME_REUSE);
+                zframe_send (&encrypted, self->router, 0);
+            }
+            else
+                client_set_exception (client);
+        }
+    }
+    zmsg_destroy (&request);
+    return 0;
+}
+
 
 static void
-s_agent_task (void *args, zctx_t *ctx, void *pipe)
+s_agent_task (void *args, zctx_t *ctx, void *control)
 {
     //  Create agent instance as we start this task
-    agent_t *self = s_agent_new (ctx, pipe);
+    agent_t *self = s_agent_new (ctx, control);
     if (!self)                  //  Interrupted
         return;
 
-    //  Always handle messages on both sockets
+    //  We always poll all three sockets
     zmq_pollitem_t pollitems [] = {
-        { self->pipe, 0, ZMQ_POLLIN, 0 },
+        { self->control, 0, ZMQ_POLLIN, 0 },
         { self->router, 0, ZMQ_POLLIN, 0 },
+        { self->data, 0, ZMQ_POLLIN, 0 }
     };
     while (!zctx_interrupted) {
-        if (zmq_poll (pollitems, 2, -1) == -1)
+        if (zmq_poll (pollitems, 3, -1) == -1)
             break;              //  Interrupted
 
         if (pollitems [0].revents & ZMQ_POLLIN)
-            s_agent_handle_pipe (self);
+            s_agent_handle_control (self);
         if (pollitems [1].revents & ZMQ_POLLIN)
             s_agent_handle_router (self);
+        if (pollitems [2].revents & ZMQ_POLLIN)
+            s_agent_handle_data (self);
 
         if (self->terminated)
             break;
@@ -642,7 +672,7 @@ curve_server_test (bool verbose)
     //  server in this foreground thread. Don't pass verbose to
     //  the clients as the results are unreadable.
     int live_clients;
-    for (live_clients = 0; live_clients < 5; live_clients++)
+    for (live_clients = 0; live_clients < 0; live_clients++)
         zthread_new (client_task, NULL);
 
     //  @selftest
@@ -667,6 +697,7 @@ curve_server_test (bool verbose)
     byte bad_server_key [32] = { 0 };
     curve_keypair_t *unknown = curve_keypair_new ();
     curve_client_t *client = curve_client_new (&unknown);
+    curve_client_set_verbose (client, true);
     curve_client_connect (client, "tcp://127.0.0.1:9000", bad_server_key);
     curve_client_sendstr (client, "Hello, World");
 
@@ -675,6 +706,7 @@ curve_server_test (bool verbose)
         { curve_client_handle (client), 0, ZMQ_POLLIN, 0 }
     };
     assert (zmq_poll (pollitems, 1, 250) == 0);
+    curve_client_destroy (&client);
 
     curve_keystore_destroy (&keystore);
     curve_server_destroy (&server);

@@ -83,7 +83,14 @@ CZMQ_EXPORT bool
 
 //  Indicate whether codec hit a fatal error
 CZMQ_EXPORT bool
-    curve_codec_errored (curve_codec_t *self);
+    curve_codec_exception (curve_codec_t *self);
+
+//  Returns metadata from peer, as a zhash table. The hash table remains
+//  owned by the codec and the caller should not use it after destroying
+//  the codec. Only valid after the peer has connected. NOTE: All keys
+//  in the hash table are lowercase.
+CZMQ_EXPORT zhash_t *
+    curve_codec_metadata (curve_codec_t *self);
 
 //  Self test of this class
 void
