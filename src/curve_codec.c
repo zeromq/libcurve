@@ -905,6 +905,19 @@ curve_codec_test (bool verbose)
     assert (sizeof (ready_t) == 30);
     assert (sizeof (message_t) == 32);
 
+    // Build and save keys for client and server
+    curve_keystore_t *keystore_junk = curve_keystore_new ();
+    curve_keypair_t *client_keypair_junk = curve_keypair_new ();
+    assert (client_keypair_junk);
+    curve_keystore_put (keystore_junk, "client", client_keypair_junk);
+    curve_keypair_t *server_keypair_junk = curve_keypair_new ();
+    assert (server_keypair_junk);
+    curve_keystore_put (keystore_junk, "server", server_keypair_junk);
+    int rc_junk = curve_keystore_save (keystore_junk, "test_keystore");
+    assert (rc_junk == 0);
+    assert (zfile_exists ("test_keystore"));
+    curve_keystore_destroy (&keystore_junk);
+
     //  We'll run the server as a background task, and the
     //  client in this foreground thread.
     zthread_new (server_task, &verbose);

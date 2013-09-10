@@ -50,4 +50,5 @@ win32/curve_selftest.exe.embed.manifest.res
 win32/curve_selftest.exe.intermediate.manifest
 win32/curve_selftest.vcproj.WS200902.user.user
 builds/mingw32/*.o
-
+.keystore
+test_keystore
