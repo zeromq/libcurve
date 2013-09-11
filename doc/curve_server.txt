@@ -10,23 +10,55 @@ SYNOPSIS
 ----
 //  Create a new server instance, providing its permanent keypair
 CZMQ_EXPORT curve_server_t *
-    curve_server_new (curve_keypair_t *keypair);
+    curve_server_new (curve_keypair_t **keypair_p);
 
 //  Destructor
 CZMQ_EXPORT void
     curve_server_destroy (curve_server_t **self_p);
 
+//  Set metadata property, will be sent to clients at connection
+CZMQ_EXPORT void
+    curve_server_set_metadata (curve_server_t *self, char *name, char *format, ...);
+
+//  Enable verbose tracing of commands and activity
+CZMQ_EXPORT void
+    curve_server_set_verbose (curve_server_t *self, bool verbose);
+
+//  Set maximum authenticated clients
+CZMQ_EXPORT void
+    curve_server_set_max_clients (curve_server_t *self, int limit);
+
+//  Set maximum unauthenticated pending clients
+CZMQ_EXPORT void
+    curve_server_set_max_pending (curve_server_t *self, int limit);
+
+//  Set time-to-live for authenticated clients
+CZMQ_EXPORT void
+    curve_server_set_client_ttl (curve_server_t *self, int limit);
+
+//  Set time-to-live for unauthenticated pending clients
+CZMQ_EXPORT void
+    curve_server_set_pending_ttl (curve_server_t *self, int limit);
+
 //  Bind server socket to local endpoint
 CZMQ_EXPORT void
     curve_server_bind (curve_server_t *self, char *endpoint);
 
+//  Unbind server socket from local endpoint, idempotent
+CZMQ_EXPORT void
+    curve_server_unbind (curve_server_t *self, char *endpoint);
+
+//  Wait for message from server
+CZMQ_EXPORT zmsg_t *
+    curve_server_recv (curve_server_t *self);
+
+//  Send message to server, takes ownership of message
+CZMQ_EXPORT int
+    curve_server_send (curve_server_t *self, zmsg_t **msg_p);
+
 //  Get socket handle, for polling
 CZMQ_EXPORT void *
     curve_server_handle (curve_server_t *self);
-
-//  Set metadata property, will be sent to clients at connection
-CZMQ_EXPORT void
-    curve_server_set_metadata (curve_server_t *self, char *name, char *format, ...);
 
 //  Self test of this class
 void
@@ -36,9 +68,9 @@ void
 DESCRIPTION
 -----------
 
-Implements a secure client socket, doing I/O in the background. This is
+Implements a secure server socket, doing I/O in the background. This is
 a high-level class intended for applications. It wraps the curve_codec
-class, and runs it across a DEALER socket to connect to a curve_server
+class, and runs it across a ROUTER socket to connect to a curve_server
 socket at the other end.
 
 
@@ -46,7 +78,40 @@ EXAMPLE
 -------
 .From curve_server_test method
 ----
-    //  Selftest is in curve_client class.
+    curve_keystore_t *keystore = curve_keystore_new ();
+    int rc = curve_keystore_load (keystore, "test_keystore");
+    assert (rc == 0);
+
+    curve_keypair_t *server_keypair = curve_keystore_get (keystore, "server");
+    curve_server_t *server = curve_server_new (&server_keypair);
+    curve_server_set_metadata (server, "Server", "CURVEZMQ/curve_server");
+    curve_server_set_verbose (server, verbose);
+    curve_server_bind (server, "tcp://*:9000");
+
+    while (live_clients > 0) {
+        zmsg_t *msg = curve_server_recv (server);
+        if (memcmp (zframe_data (zmsg_last (msg)), "END", 3) == 0)
+            live_clients--;
+        curve_server_send (server, &msg);
+    }
+
+    //  Try an invalid client/server combination
+    byte bad_server_key [32] = { 0 };
+    curve_keypair_t *unknown = curve_keypair_new ();
+    curve_client_t *client = curve_client_new (&unknown);
+    curve_client_set_verbose (client, true);
+    curve_client_connect (client, "tcp://127.0.0.1:9000", bad_server_key);
+    curve_client_sendstr (client, "Hello, World");
+
+    //  Expect no reply after 250msec
+    zmq_pollitem_t pollitems [] = {
+        { curve_client_handle (client), 0, ZMQ_POLLIN, 0 }
+    };
+    assert (zmq_poll (pollitems, 1, 250) == 0);
+    curve_client_destroy (&client);
+
+    curve_keystore_destroy (&keystore);
+    curve_server_destroy (&server);
 ----
 
 SEE ALSO

@@ -8,9 +8,11 @@ curve_client - Secure client socket
 SYNOPSIS
 --------
 ----
-//  Create a new client instance, providing its permanent keypair
+//  Create a new curve_client instance.
+//  We use a context per instance to keep the API as simple as possible.
+//  Takes ownership of keypair.
 CZMQ_EXPORT curve_client_t *
-    curve_client_new (curve_keypair_t *keypair);
+    curve_client_new (curve_keypair_t **keypair_p);
 
 //  Destructor
 CZMQ_EXPORT void
@@ -20,14 +22,18 @@ CZMQ_EXPORT void
 CZMQ_EXPORT void
     curve_client_set_metadata (curve_client_t *self, char *name, char *format, ...);
 
+//  Enable verbose tracing of commands and activity
+CZMQ_EXPORT void
+    curve_client_set_verbose (curve_client_t *self, bool verbose);
+
 //  Create outgoing connection to server, providing server permanent
 //  public key
 CZMQ_EXPORT void
     curve_client_connect (curve_client_t *self, char *endpoint, byte *server_key);
 
-//  Close outgoing connection to server
+//  Close outgoing connection to server; idempotent
 CZMQ_EXPORT void
-    curve_client_disconnect (curve_client_t *self);
+    curve_client_disconnect (curve_client_t *self, char *endpoint);
 
 //  Send message to server, takes ownership of message
 CZMQ_EXPORT int
@@ -37,7 +43,17 @@ CZMQ_EXPORT int
 CZMQ_EXPORT zmsg_t *
     curve_client_recv (curve_client_t *self);
 
+//  Send single-frame string message to server
+CZMQ_EXPORT int
+    curve_client_sendstr (curve_client_t *self, char *string);
+
+//  Wait for single-frame string message from server
+CZMQ_EXPORT char *
+    curve_client_recvstr (curve_client_t *self);
+
 //  Get socket handle, for polling
+//  NOTE: do not call send/recv directly on handle since internal message
+//  format is NOT A CONTRACT and is liable to change arbitrarily.
 CZMQ_EXPORT void *
     curve_client_handle (curve_client_t *self);
 
@@ -59,19 +75,68 @@ EXAMPLE
 -------
 .From curve_client_test method
 ----
-    curve_keypair_t *client_keypair = curve_keypair_new ();
-    curve_client_t *client = curve_client_new (client_keypair);
+    curve_keystore_t *keystore = curve_keystore_new ();
+    int rc = curve_keystore_load (keystore, "test_keystore");
+    assert (rc == 0);
+
+    curve_keypair_t *client_keypair = curve_keystore_get (keystore, "client");
+    curve_client_t *client = curve_client_new (&client_keypair);
     curve_client_set_metadata (client, "Client", "CURVEZMQ/curve_client");
     curve_client_set_metadata (client, "Identity", "E475DA11");
-    curve_keypair_destroy (&client_keypair);
+    curve_client_set_verbose (client, verbose);
 
-    curve_keypair_t *server_keypair = curve_keypair_new ();
-    curve_server_t *server = curve_server_new (server_keypair);
-    curve_server_set_metadata (server, "Server", "CURVEZMQ/curve_server");
+    curve_keypair_t *server_keypair = curve_keystore_get (keystore, "server");
+    curve_client_connect (client, "tcp://127.0.0.1:9000", curve_keypair_public (server_keypair));
     curve_keypair_destroy (&server_keypair);
 
+    curve_client_sendstr (client, "Hello, World");
+    char *reply = curve_client_recvstr (client);
+    assert (streq (reply, "Hello, World"));
+    free (reply);
+
+    //  Try a multipart message
+    zmsg_t *msg = zmsg_new ();
+    zmsg_pushstr (msg, "Hello, World");
+    zmsg_pushstr (msg, "Second frame");
+    curve_client_send (client, &msg);
+    msg = curve_client_recv (client);
+    assert (zmsg_size (msg) == 2);
+    zmsg_destroy (&msg);
+
+    //  Now send messages of increasing size, check they work
+    int count;
+    int size = 0;
+    for (count = 0; count < 18; count++) {
+        if (verbose)
+            printf ("Testing message of size=%d...\n", size);
+
+        zframe_t *data = zframe_new (NULL, size);
+        int byte_nbr;
+        //  Set data to sequence 0...255 repeated
+        for (byte_nbr = 0; byte_nbr < size; byte_nbr++)
+            zframe_data (data)[byte_nbr] = (byte) byte_nbr;
+        msg = zmsg_new ();
+        zmsg_push (msg, data);
+        curve_client_send (client, &msg);
+
+        msg = curve_client_recv (client);
+        data = zmsg_pop (msg);
+        assert (data);
+        assert (zframe_size (data) == size);
+        for (byte_nbr = 0; byte_nbr < size; byte_nbr++) {
+            assert (zframe_data (data)[byte_nbr] == (byte) byte_nbr);
+        }
+        zframe_destroy (&data);
+        zmsg_destroy (&msg);
+        size = size * 2 + 1;
+    }
+    //  Signal end of test
+    curve_client_sendstr (client, "END");
+    reply = curve_client_recvstr (client);
+    free (reply);
+
+    curve_keystore_destroy (&keystore);
     curve_client_destroy (&client);
-    curve_server_destroy (&server);
 ----
 
 SEE ALSO
