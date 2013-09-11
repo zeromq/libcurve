@@ -180,9 +180,8 @@ curve_codec_new_server (curve_keypair_t *keypair, zctx_t *ctx)
     self->metadata_recd = zhash_new ();
     zhash_autofree (self->metadata_recd);
     self->permakey = curve_keypair_dup (keypair);
-    //  We don't generate a transient keypair yet because that uses
-    //  up entropy so would allow unauthenticated clients to do a
-    //  Denial-of-Entropy attack.
+    //  We don't generate a transient keypair yet because that uses up
+    //  entropy so would allow arbitrary clients to do a DoS attack.
 
     return self;
 }
@@ -541,7 +540,9 @@ s_produce_welcome (curve_codec_t *self)
     byte nonce [24];            //  Full nonces are always 24 bytes
     byte plain [128];           //  Space for baking our cookies
 
-    //  Client is authenticated, so it's safe to generate a transient keypair
+    //  Generate client transient key as late as possible. We have not
+    //  yet authenticated the client, so it may be hostile, but at least
+    //  it knows the server's public key.
     self->transkey = curve_keypair_new ();
 
     //  Generate cookie = Box [C' + s'](t),
