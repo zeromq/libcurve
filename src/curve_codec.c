@@ -28,7 +28,6 @@
     zframes. All I/O is the responsibility of the caller. This is the
     reference implementation of CurveZMQ. You will not normally want to use
     it directly in application code as the API is low-level and complex.
-    TODO: authentication via ZAP - http://rfc.zeromq.org/spec:27/ZAP
 @discuss
 @end
 */
@@ -68,6 +67,7 @@ typedef enum {
 
 //  Structure of our class
 struct _curve_codec_t {
+    zctx_t *ctx;                //  Context for ZAP authentication
     curve_keypair_t
         *permakey;              //  Our permanent key
     curve_keypair_t
@@ -135,8 +135,8 @@ typedef struct {
 
 //  --------------------------------------------------------------------------
 //  Constructors
-//  Create a new curve_codec client instance, providing permanent keypair
-//  for the client. Takes ownership of keypair.
+//  Create a new curve_codec client instance. Caller provides the
+//  permanent keypair for the client.
 
 curve_codec_t *
 curve_codec_new_client (curve_keypair_t *keypair)
@@ -154,21 +154,24 @@ curve_codec_new_client (curve_keypair_t *keypair)
     zhash_autofree (self->metadata_recd);
     self->permakey = curve_keypair_dup (keypair);
     self->transkey = curve_keypair_new ();
+
     return self;
 }
 
 
 //  --------------------------------------------------------------------------
-//  Create a new curve_codec server instance, providing permanent keypair
-//  for the server. Takes ownership of keypair.
+//  Create a new curve_codec server instance. Caller provides the
+//  permanent keypair for the server, and optionally a context used
+//  for inproc authentication of client keys over ZAP (0MQ RFC 27).
 
 curve_codec_t *
-curve_codec_new_server (curve_keypair_t *keypair)
+curve_codec_new_server (curve_keypair_t *keypair, zctx_t *ctx)
 {
     curve_codec_t *self = (curve_codec_t *) zmalloc (sizeof (curve_codec_t));
     assert (self);
     assert (keypair);
 
+    self->ctx = ctx;
     self->is_server = true;
     self->state = expect_hello;
 
@@ -180,6 +183,7 @@ curve_codec_new_server (curve_keypair_t *keypair)
     //  We don't generate a transient keypair yet because that uses
     //  up entropy so would allow unauthenticated clients to do a
     //  Denial-of-Entropy attack.
+
     return self;
 }
 
@@ -444,6 +448,52 @@ s_decode_metadata (curve_codec_t *self, byte *data, size_t size)
     }
 }
 
+//  If ZAP context is known, authenticate via ZAP handler; return 0
+//  if OK, -1 if not allowed. If no authentication is installed,
+//  returns 0.
+
+static int
+s_authenticate_peer (curve_codec_t *self)
+{
+    if (!self->ctx)
+        return 0;
+
+    //  Create a socket for the ZAP request; we'll destroy this as soon
+    //  as the request is done, to avoid old sockets accumulating in the
+    //  parent context.
+    void *requestor = zsocket_new (self->ctx, ZMQ_REQ);
+    if (zsocket_connect (requestor, "inproc://zeromq.zap.01") == -1) {
+        zsocket_destroy (self->ctx, requestor);
+        return 0;                       //  ZAP not installed
+    }
+    zmsg_t *request = zmsg_new ();
+    zmsg_addstr (request, "1.0");       //  ZAP version 1.0
+    zmsg_addstr (request, "");          //  Sequence number, unused
+    zmsg_addstr (request, "libcurve");  //  Domain, unused
+    zmsg_addstr (request, "");          //  Address, unused
+    zmsg_addstr (request, "");          //  Identity, unused
+    zmsg_addstr (request, "CURVE");     //  Mechanism = CURVE
+    zmsg_addmem (request, self->peer_permakey, 32);
+
+    int rc = -1;                        //  By default, denied
+    if (zmsg_send (&request, requestor) == 0) {
+        zmsg_t *reply = zmsg_recv (requestor);
+        if (reply) {
+            //  Discard version and sequence number
+            free (zmsg_popstr (reply));
+            free (zmsg_popstr (reply));
+            char *status_code = zmsg_popstr (reply);
+            if (streq (status_code, "200"))
+                rc = 0;                 //  Authorized OK
+            free (status_code);
+            zmsg_destroy (&reply);
+        }
+    }
+    zsocket_destroy (self->ctx, requestor);
+    return rc;
+}
+
+
 static zframe_t *
 s_produce_hello (curve_codec_t *self)
 {
@@ -640,7 +690,8 @@ s_process_initiate (curve_codec_t *self, zframe_t *input)
 
     if (rc == 0) {
         memcpy (self->peer_permakey, plain, 32);
-        //  TODO: call ZAP handler to authenticate client key
+        if (s_authenticate_peer (self))
+            rc = -1;            //  Authentication failed
     }
     if (rc == 0) {
         s_decode_metadata (self, plain + 96, metadata_size);
@@ -949,6 +1000,52 @@ curve_codec_metadata (curve_codec_t *self)
 //  both single and multipart messages. A message "END" signals the end
 //  of the test.
 
+//  This is our ZAP authenticator; for now it approves all clients
+
+void zap_authenticator (void *args, zctx_t *ctx, void *pipe)
+{
+    void *handler = zsocket_new (ctx, ZMQ_REP);
+    int rc = zsocket_bind (handler, "inproc://zeromq.zap.01");
+    assert (rc != -1);
+
+    while (true) {
+        zmsg_t *request = zmsg_recv (handler);
+        if (!request)
+            break;              //  Interrupted, so exit thread
+
+        //  Check version number
+        char *version = zmsg_popstr (request);
+        assert (streq (version, "1.0"));
+        free (version);
+
+        //  Get sequence number for use in reply
+        char *sequence = zmsg_popstr (request);
+
+        //  Discard domain, address, and identity
+        free (zmsg_popstr (request));
+        free (zmsg_popstr (request));
+        free (zmsg_popstr (request));
+
+        //  Get and validate mechanism
+        char *mechanism = zmsg_popstr (request);
+        assert (streq (mechanism, "CURVE"));
+        free (mechanism);
+
+        //  Rest of request contains client public key
+        assert (zmsg_size (request) == 1);
+        zmsg_destroy (&request);
+
+        zmsg_t *reply = zmsg_new ();
+        zmsg_addstr (reply, "1.0");       //  ZAP version 1.0
+        zmsg_addstr (reply, sequence);    //  Sequence number
+        zmsg_addstr (reply, "200");
+        zmsg_addstr (reply, "OK");
+        zmsg_addstr (reply, "");
+        zmsg_send (&reply, handler);
+        free (sequence);
+    }
+}
+
 static void *
 server_task (void *args)
 {
@@ -960,13 +1057,16 @@ server_task (void *args)
     int rc = zsocket_bind (router, "tcp://*:9000");
     assert (rc != -1);
 
+    //  Fork a child thread to do ZAP authentication
+    zthread_fork (ctx, zap_authenticator, NULL);
+
     //  Create a new server instance
     curve_keystore_t *keystore = curve_keystore_new ();
     rc = curve_keystore_load (keystore, "test_keystore");
     assert (rc == 0);
     curve_keypair_t *keypair = curve_keystore_get (keystore, "server");
     assert (keypair);
-    curve_codec_t *server = curve_codec_new_server (keypair);
+    curve_codec_t *server = curve_codec_new_server (keypair, ctx);
     assert (server);
     curve_keypair_destroy (&keypair);
     curve_codec_set_verbose (server, verbose);
@@ -1153,7 +1253,7 @@ curve_codec_test (bool verbose)
     //  Some invalid operations to test exception handling
     keypair = curve_keypair_new ();
     input = zframe_new (curve_keypair_public (keypair), 32);
-    curve_codec_t *server = curve_codec_new_server (keypair);
+    curve_codec_t *server = curve_codec_new_server (keypair, ctx);
     curve_keypair_destroy (&keypair);
     curve_codec_execute (server, &input);
     assert (curve_codec_exception (server));

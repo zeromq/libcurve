@@ -32,9 +32,6 @@
 @end
 */
 
-//  TODO: authenticate new clients via ZAP handler
-
-
 #include "../include/curve.h"
 
 //  Structure of our class
@@ -324,7 +321,7 @@ client_new (agent_t *agent, zframe_t *address)
     client_t *self = (client_t *) zmalloc (sizeof (client_t));
     assert (self);
     self->agent = agent;
-    self->codec = curve_codec_new_server (agent->keypair);
+    self->codec = curve_codec_new_server (agent->keypair, agent->ctx);
     self->address = zframe_dup (address);
     self->hashkey = zframe_strhex (address);
     return self;

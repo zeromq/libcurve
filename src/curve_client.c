@@ -446,7 +446,7 @@ server_task (void *args)
     assert (rc == 0);
     curve_keypair_t *keypair = curve_keystore_get (keystore, "server");
     assert (keypair);
-    curve_codec_t *server = curve_codec_new_server (keypair);
+    curve_codec_t *server = curve_codec_new_server (keypair, ctx);
     assert (server);
     curve_keypair_destroy (&keypair);
     curve_codec_set_verbose (server, verbose);

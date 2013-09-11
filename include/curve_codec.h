@@ -33,15 +33,16 @@ extern "C" {
 typedef struct _curve_codec_t curve_codec_t;
 
 //  @interface
-//  Create a new curve_codec client instance, providing permanent keypair
-//  for the client. Takes ownership of keypair.
+//  Create a new curve_codec client instance. Caller provides the
+//  permanent keypair for the client.
 CZMQ_EXPORT curve_codec_t *
     curve_codec_new_client (curve_keypair_t *keypair);
 
-//  Create a new curve_codec server instance, providing permanent keypair
-//  for the server. Takes ownership of keypair.
+//  Create a new curve_codec server instance. Caller provides the
+//  permanent keypair for the server, and optionally a context used
+//  for inproc authentication of client keys over ZAP (0MQ RFC 27).
 CZMQ_EXPORT curve_codec_t *
-    curve_codec_new_server (curve_keypair_t *keypair);
+    curve_codec_new_server (curve_keypair_t *keypair, zctx_t *ctx);
 
 //  Destructor
 CZMQ_EXPORT void
