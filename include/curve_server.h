@@ -49,6 +49,22 @@ CZMQ_EXPORT void
 CZMQ_EXPORT void
     curve_server_set_verbose (curve_server_t *self, bool verbose);
 
+//  Set maximum authenticated clients
+CZMQ_EXPORT void
+    curve_server_set_max_clients (curve_server_t *self, int limit);
+
+//  Set maximum unauthenticated pending clients
+CZMQ_EXPORT void
+    curve_server_set_max_pending (curve_server_t *self, int limit);
+
+//  Set time-to-live for authenticated clients
+CZMQ_EXPORT void
+    curve_server_set_client_ttl (curve_server_t *self, int limit);
+
+//  Set time-to-live for unauthenticated pending clients
+CZMQ_EXPORT void
+    curve_server_set_pending_ttl (curve_server_t *self, int limit);
+
 //  Bind server socket to local endpoint
 CZMQ_EXPORT void
     curve_server_bind (curve_server_t *self, char *endpoint);

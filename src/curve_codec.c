@@ -28,7 +28,6 @@
     zframes. All I/O is the responsibility of the caller. This is the
     reference implementation of CurveZMQ. You will not normally want to use
     it directly in application code as the API is low-level and complex.
-    TODO: authentication via ZAP - http://rfc.zeromq.org/spec:27/ZAP
 @discuss
 @end
 */
@@ -52,7 +51,7 @@ typedef enum {
     expect_initiate,            //  S: accepts INITIATE from client
     expect_ready,               //  C: accepts READY from server
     expect_message,             //  C/S: accepts MESSAGE from server
-    errored                     //  Error condition, no work possible
+    exception                     //  Error condition, no work possible
 } state_t;
 
 //  For parsing incoming commands
@@ -68,27 +67,27 @@ typedef enum {
 
 //  Structure of our class
 struct _curve_codec_t {
+    zctx_t *ctx;                //  Context for ZAP authentication
     curve_keypair_t
         *permakey;              //  Our permanent key
     curve_keypair_t
         *transkey;              //  Our transient key
-    byte precomputed [32];      //  Precomputed key
-
-    //  At some point we have to know the public keys for our peer
-    byte peer_permakey [32];    //  Permanent public key for peer
-    byte peer_transkey [32];    //  Transient public key for peer
 
     bool verbose;               //  Trace activity to stdout
     state_t state;              //  Current codec state
     int64_t nonce_counter;      //  Counter for short nonces
-
-    //  Metadata properties
-    //  TODO: use a zhash dictionary here
-    byte metadata [1000];       //  Encoded for the wire
-    size_t metadata_size;       //  Actual size so far
-
+    zhash_t *metadata_sent;     //  Metadata sent to peer
+    zhash_t *metadata_recd;     //  Metadata received from peer
+    byte *metadata_data;        //  Serialized metadata
+    size_t metadata_size;       //  Size of serialized metadata
+    size_t metadata_curr;       //  Size during serialization process
     bool is_server;             //  True for server-side codec
     char error_text [128];      //  In case of an error
+
+    //  At some point we have to know the public keys for our peer
+    byte peer_permakey [32];    //  Permanent public key for peer
+    byte peer_transkey [32];    //  Transient public key for peer
+    byte precomputed [32];      //  Precomputed transient key
 
     //  Server connection properties
     byte cookie_key [32];       //  Server cookie key
@@ -136,43 +135,55 @@ typedef struct {
 
 //  --------------------------------------------------------------------------
 //  Constructors
-//  Create a new curve_codec client instance, providing permanent keypair
-//  for the client. Takes ownership of keypair.
+//  Create a new curve_codec client instance. Caller provides the
+//  permanent keypair for the client.
 
 curve_codec_t *
-curve_codec_new_client (curve_keypair_t **keypair_p)
+curve_codec_new_client (curve_keypair_t *keypair)
 {
     curve_codec_t *self = (curve_codec_t *) zmalloc (sizeof (curve_codec_t));
     assert (self);
-    assert (keypair_p);
+    assert (keypair);
+
     self->is_server = false;
     self->state = send_hello;
-    self->permakey = *keypair_p;
-    //  We now own the keypair so nullify caller's reference
-    *keypair_p = NULL;
+
+    self->metadata_sent = zhash_new ();
+    zhash_autofree (self->metadata_sent);
+    self->metadata_recd = zhash_new ();
+    zhash_autofree (self->metadata_recd);
+    self->permakey = curve_keypair_dup (keypair);
     self->transkey = curve_keypair_new ();
+
     return self;
 }
 
 
 //  --------------------------------------------------------------------------
-//  Create a new curve_codec server instance, providing permanent keypair
-//  for the server. Takes ownership of keypair.
+//  Create a new curve_codec server instance. Caller provides the
+//  permanent keypair for the server, and optionally a context used
+//  for inproc authentication of client keys over ZAP (0MQ RFC 27).
 
 curve_codec_t *
-curve_codec_new_server (curve_keypair_t **keypair_p)
+curve_codec_new_server (curve_keypair_t *keypair, zctx_t *ctx)
 {
     curve_codec_t *self = (curve_codec_t *) zmalloc (sizeof (curve_codec_t));
     assert (self);
-    assert (keypair_p);
+    assert (keypair);
+
+    self->ctx = ctx;
     self->is_server = true;
     self->state = expect_hello;
-    self->permakey = *keypair_p;
-    //  We now own the keypair so nullify caller's reference
-    *keypair_p = NULL;
+
+    self->metadata_sent = zhash_new ();
+    zhash_autofree (self->metadata_sent);
+    self->metadata_recd = zhash_new ();
+    zhash_autofree (self->metadata_recd);
+    self->permakey = curve_keypair_dup (keypair);
     //  We don't generate a transient keypair yet because that uses
     //  up entropy so would allow unauthenticated clients to do a
     //  Denial-of-Entropy attack.
+
     return self;
 }
 
@@ -188,6 +199,9 @@ curve_codec_destroy (curve_codec_t **self_p)
         curve_codec_t *self = *self_p;
         curve_keypair_destroy (&self->permakey);
         curve_keypair_destroy (&self->transkey);
+        zhash_destroy (&self->metadata_sent);
+        zhash_destroy (&self->metadata_recd);
+        free (self->metadata_data);
         free (self);
         *self_p = NULL;
     }
@@ -203,29 +217,8 @@ curve_codec_set_metadata (curve_codec_t *self, char *name, char *value)
 {
     assert (self);
     assert (name && value);
-    size_t name_len = strlen (name);
-    size_t value_len = strlen (value);
-    assert (name_len > 0 && name_len < 256);
-    byte *needle = self->metadata + self->metadata_size;
-
-    //  Encode name
-    *needle++ = (byte) name_len;
-    memcpy (needle, name, name_len);
-    needle += name_len;
-
-    //  Encode value
-    *needle++ = (byte) ((value_len >> 24) && 255);
-    *needle++ = (byte) ((value_len >> 16) && 255);
-    *needle++ = (byte) ((value_len >> 8)  && 255);
-    *needle++ = (byte) ((value_len)       && 255);
-    memcpy (needle, value, value_len);
-    needle += value_len;
-
-    //  Update size of metadata so far
-    self->metadata_size = needle - self->metadata;
-    //  This is a throwaway implementation; a proper metadata design would use
-    //  a hash table and serialize to any size. TODO: rewrite this.
-    assert (self->metadata_size < 1000);
+    assert (strlen (name) > 0 && strlen (name) < 256);
+    zhash_insert (self->metadata_sent, name, value);
 }
 
 
@@ -244,14 +237,14 @@ curve_codec_set_verbose (curve_codec_t *self, bool verbose)
 //  Internal functions for working with CurveZMQ commands
 
 static void
-s_set_error (curve_codec_t *self, char *error_text)
+s_raise_exception (curve_codec_t *self, char *error_text)
 {
     strcpy (self->error_text, error_text);
-    self->state = errored;
+    self->state = exception;
 }
 
-//  Encrypt a block of data using the connection nonce
-//  If key_to/key_from are null, uses precomputed key
+//  Encrypt a block of data using the connection nonce. If
+//  key_to/key_from are null, uses precomputed key.
 
 static void
 s_encrypt (
@@ -311,13 +304,14 @@ s_encrypt (
 
 
 //  Decrypt a block of data using the connection nonce and precomputed key
-//  If key_to/key_from are null, uses precomputed key
+//  If key_to/key_from are null, uses precomputed key. Returns 0 if OK,
+//  -1 if there was an exception.
 
-static void
+static int
 s_decrypt (
     curve_codec_t *self,    //  curve_codec instance sending the data
-    byte *source,           //  source must be nonce + box
-    byte *data,             //  Where to store decrypted clear text
+    byte *source,           //  Source must be nonce + box
+    byte *target,           //  Where to store decrypted clear text
     size_t size,            //  Size of clear text data
     char *prefix,           //  Nonce prefix to use, 8 or 16 chars
     byte *key_to,           //  Key to decrypt to, may be null
@@ -353,13 +347,152 @@ s_decrypt (
 
     //  If we cannot open the box, it means it's been modified or is unauthentic
     if (rc == 0)
-        memcpy (data, plain + crypto_box_ZEROBYTES, size);
+        memcpy (target, plain + crypto_box_ZEROBYTES, size);
     else
-        s_set_error (self, "Could not open box from peer");
+    if (self->verbose)
+        puts ("E: invalid box received, cannot open it");
 
     free (plain);
     free (box);
+    return rc;
 }
+
+static int
+s_count_total_size (const char *name, void *value, void *arg)
+{
+    curve_codec_t *self = (curve_codec_t *) arg;
+    self->metadata_size += strlen (name) + strlen ((char *) value) + 5;
+    return 0;
+}
+
+static int
+s_encode_property (const char *name, void *value, void *arg)
+{
+    curve_codec_t *self = (curve_codec_t *) arg;
+    byte *needle = self->metadata_data + self->metadata_curr;
+    size_t name_len = strlen (name);
+    size_t value_len = strlen ((char *) value);
+
+    //  Encode name
+    *needle++ = (byte) name_len;
+    memcpy (needle, (byte *) name, name_len);
+    needle += name_len;
+
+    //  Encode value
+    *needle++ = (byte) ((value_len >> 24) & 255);
+    *needle++ = (byte) ((value_len >> 16) & 255);
+    *needle++ = (byte) ((value_len >> 8)  & 255);
+    *needle++ = (byte) ((value_len)       & 255);
+    memcpy (needle, (byte *) value, value_len);
+    needle += value_len;
+
+    self->metadata_curr = needle - self->metadata_data;
+    return 0;
+}
+
+
+//  Encode self->metadata_sent into buffer ready to send
+
+static void
+s_encode_metadata (curve_codec_t *self)
+{
+    self->metadata_size = 0;
+    zhash_foreach (self->metadata_sent, s_count_total_size, self);
+    self->metadata_data = zmalloc (self->metadata_size);
+    self->metadata_curr = 0;
+    zhash_foreach (self->metadata_sent, s_encode_property, self);
+    assert (self->metadata_curr == self->metadata_size);
+}
+
+
+//  Decode metadata from provided buffer into self->metadata_recd
+
+static void
+s_decode_metadata (curve_codec_t *self, byte *data, size_t size)
+{
+    byte *needle = data;
+    byte *limit = data + size;
+
+    //  Each property uses at least six bytes
+    while (needle < limit - 6) {
+        size_t name_len;
+        size_t value_len;
+        name_len = *needle++;
+        if (needle + name_len > limit - 5)
+            break;      //  Invalid property, skip the rest
+
+        char *name = malloc (name_len + 1);
+        memcpy ((byte *) name, needle, name_len);
+        name [name_len] = 0;
+        needle += name_len;
+        //  Normalize name as all lower-case
+        char *char_ptr = name;
+        while (*char_ptr) {
+            *char_ptr = tolower (*char_ptr);
+            char_ptr++;
+        }
+
+        value_len = (needle [0] << 24)
+                  + (needle [1] << 16)
+                  + (needle [2] << 8)
+                  +  needle [3];
+        needle += 4;
+        char *value = malloc (value_len + 1);
+        memcpy ((byte *) value, needle, value_len);
+        value [value_len] = 0;
+        needle += value_len;
+
+        zhash_insert (self->metadata_recd, name, (char *) value);
+        free (name);
+        free (value);
+    }
+}
+
+//  If ZAP context is known, authenticate via ZAP handler; return 0
+//  if OK, -1 if not allowed. If no authentication is installed,
+//  returns 0.
+
+static int
+s_authenticate_peer (curve_codec_t *self)
+{
+    if (!self->ctx)
+        return 0;
+
+    //  Create a socket for the ZAP request; we'll destroy this as soon
+    //  as the request is done, to avoid old sockets accumulating in the
+    //  parent context.
+    void *requestor = zsocket_new (self->ctx, ZMQ_REQ);
+    if (zsocket_connect (requestor, "inproc://zeromq.zap.01") == -1) {
+        zsocket_destroy (self->ctx, requestor);
+        return 0;                       //  ZAP not installed
+    }
+    zmsg_t *request = zmsg_new ();
+    zmsg_addstr (request, "1.0");       //  ZAP version 1.0
+    zmsg_addstr (request, "");          //  Sequence number, unused
+    zmsg_addstr (request, "libcurve");  //  Domain, unused
+    zmsg_addstr (request, "");          //  Address, unused
+    zmsg_addstr (request, "");          //  Identity, unused
+    zmsg_addstr (request, "CURVE");     //  Mechanism = CURVE
+    zmsg_addmem (request, self->peer_permakey, 32);
+
+    int rc = -1;                        //  By default, denied
+    if (zmsg_send (&request, requestor) == 0) {
+        zmsg_t *reply = zmsg_recv (requestor);
+        if (reply) {
+            //  Discard version and sequence number
+            free (zmsg_popstr (reply));
+            free (zmsg_popstr (reply));
+            char *status_code = zmsg_popstr (reply);
+            if (streq (status_code, "200"))
+                rc = 0;                 //  Authorized OK
+            free (status_code);
+            zmsg_destroy (&reply);
+        }
+    }
+    zsocket_destroy (self->ctx, requestor);
+    return rc;
+}
+
 
 static zframe_t *
 s_produce_hello (curve_codec_t *self)
@@ -375,25 +508,26 @@ s_produce_hello (curve_codec_t *self)
                "CurveZMQHELLO---",
                self->peer_permakey,     //  Server public key
                curve_keypair_secret (self->transkey));
+
     return command;
 }
 
-static void
+//  Returns 0 if OK, -1 if command or keys were invalid
+static int
 s_process_hello (curve_codec_t *self, zframe_t *input)
 {
     hello_t *hello = (hello_t *) zframe_data (input);
 
     memcpy (self->peer_transkey, hello->client, 32);
     byte signature_received [64];
-    byte signature_expected [64] = { 0 };
-    s_decrypt (self, hello->nonce,
-               signature_received, 64,
-               "CurveZMQHELLO---",
-               hello->client,
-               curve_keypair_secret (self->permakey));
+    int rc = s_decrypt (self,
+        hello->nonce,
+        signature_received, 64,
+        "CurveZMQHELLO---",
+        hello->client,
+        curve_keypair_secret (self->permakey));
 
-    if (memcmp (signature_received, signature_expected, 64))
-        s_set_error (self, "Invalid signature received from client");
+    return rc;
 }
 
 static zframe_t *
@@ -443,18 +577,25 @@ s_produce_welcome (curve_codec_t *self)
     return command;
 }
 
-static void
+//  Returns 0 if OK, -1 if command or keys were invalid
+static int
 s_process_welcome (curve_codec_t *self, zframe_t *input)
 {
     //  Open Box [S' + cookie](C'->S)
     byte plain [128];
     welcome_t *welcome = (welcome_t *) zframe_data (input);
-    s_decrypt (self, welcome->nonce,
-               plain, 128, "WELCOME-",
-               self->peer_permakey,     //  Server public key
-               curve_keypair_secret (self->transkey));
-    memcpy (self->peer_transkey, plain, 32);
-    memcpy (self->cookie, plain + 32, 96);
+    int rc = s_decrypt (self,
+        welcome->nonce,
+        plain, 128,
+        "WELCOME-",
+        self->peer_permakey,    //  Server public key
+        curve_keypair_secret (self->transkey));
+
+    if (rc == 0) {
+        memcpy (self->peer_transkey, plain, 32);
+        memcpy (self->cookie, plain + 32, 96);
+    }
+    return rc;
 }
 
 //  Pre-compute connection secret from peer's transient key
@@ -471,6 +612,8 @@ s_precompute_key (curve_codec_t *self)
 static zframe_t *
 s_produce_initiate (curve_codec_t *self)
 {
+    //  Create serialized metdata data buffer ready to send
+    s_encode_metadata (self);
     zframe_t *command = zframe_new (NULL, sizeof (initiate_t) + self->metadata_size);
     initiate_t *initiate = (initiate_t *) zframe_data (command);
     memcpy (initiate->id, "\x08INITIATE", 9);
@@ -492,7 +635,7 @@ s_produce_initiate (curve_codec_t *self)
     //  Create Box [C + vouch + metadata](C'->S')
     memcpy (plain, curve_keypair_public (self->permakey), 32);
     memcpy (plain + 32, vouch, 64);
-    memcpy (plain + 96, self->metadata, self->metadata_size);
+    memcpy (plain + 96, self->metadata_data, self->metadata_size);
     s_encrypt (self, initiate->nonce,
                plain, 96 + self->metadata_size,
                "CurveZMQINITIATE",
@@ -503,7 +646,8 @@ s_produce_initiate (curve_codec_t *self)
     return command;
 }
 
-static void
+//  Returns 0 if OK, -1 if command or keys were invalid
+static int
 s_process_initiate (curve_codec_t *self, zframe_t *input)
 {
     //  Working variables for crypto calls
@@ -523,78 +667,88 @@ s_process_initiate (curve_codec_t *self, zframe_t *input)
     //  Cookie box is next 80 bytes of cookie
     memset (box, 0, crypto_box_BOXZEROBYTES);
     memcpy (box + crypto_box_BOXZEROBYTES, initiate->cookie + 16, 80);
-    int rc = crypto_secretbox_open (plain, box,
-                                    crypto_box_BOXZEROBYTES + 80,
-                                    nonce, self->cookie_key);
+    int rc = crypto_secretbox_open (
+        plain, box, crypto_box_BOXZEROBYTES + 80,
+        nonce, self->cookie_key);
+
     //  Throw away the cookie key
     memset (self->cookie_key, 0, 32);
     if (rc == 0) {
         //  Check cookie plain text is as expected [C' + s']
-        if (memcmp (plain + crypto_box_ZEROBYTES, self->peer_transkey, 32))
-            s_set_error (self, "Cookie contents are not valid (client transient key)");
-        else
-        if (memcmp (plain + crypto_box_ZEROBYTES + 32,
-                    curve_keypair_secret (self->transkey), 32))
-            s_set_error (self, "Cookie contents are not valid (own transient key)");
+        byte *cookie = plain + crypto_box_ZEROBYTES;
+        if (memcmp (cookie, self->peer_transkey, 32)
+        ||  memcmp (cookie + 32, curve_keypair_secret (self->transkey), 32))
+            rc = -1;
     }
-    else
-        s_set_error (self, "Bad cookie received from client");
-
-    if (self->state != errored)
+    if (rc == 0)
         //  Open Box [C + vouch + metadata](C'->S')
-        s_decrypt (self, initiate->nonce,
-                plain, 96 + metadata_size,
-                "CurveZMQINITIATE",
-                NULL, NULL);
+        rc = s_decrypt (self,
+            initiate->nonce,
+            plain, 96 + metadata_size,
+            "CurveZMQINITIATE",
+            NULL, NULL);
 
-    if (self->state != errored)
+    if (rc == 0) {
         memcpy (self->peer_permakey, plain, 32);
-        //  TODO: call ZAP handler to authenticate client key
+        if (s_authenticate_peer (self))
+            rc = -1;            //  Authentication failed
+    }
+    if (rc == 0) {
+        s_decode_metadata (self, plain + 96, metadata_size);
 
-    if (self->state != errored)
-        //  Metadata is at plain + 96
-        //  TODO: load metadata into zhash for caller to access
-
-    if (self->state != errored) {
         //  Vouch nonce + box is 64 bytes at plain + 32
         byte vouch [64];
         memcpy (vouch, plain + 32, 64);
-        s_decrypt (self, vouch,
-                plain, 32, "VOUCH---",
-                self->peer_permakey,    //  Client permanent key
-                curve_keypair_secret (self->permakey));
-    }
-    if (self->state != errored) {
-        //  What we decrypted must be the short term client public key
-        if (memcmp (plain, self->peer_transkey, 32))
-            s_set_error (self, "Bad vouch received from client");
+        int rc = s_decrypt (self,
+            vouch,
+            plain, 32,
+            "VOUCH---",
+            self->peer_permakey,    //  Client permanent key
+            curve_keypair_secret (self->permakey));
+
+        //  Check vouch is short term client public key
+        if (rc == 0 && memcmp (plain, self->peer_transkey, 32))
+            rc = -1;
     }
     free (plain);
     free (box);
+    return rc;
 }
 
 static zframe_t *
 s_produce_ready (curve_codec_t *self)
 {
+    //  Create serialized metdata data buffer ready to send
+    s_encode_metadata (self);
+
     zframe_t *command = zframe_new (NULL, sizeof (ready_t) + self->metadata_size);
     ready_t *ready = (ready_t *) zframe_data (command);
     memcpy (ready->id, "\x05READY", 6);
     s_encrypt (self, ready->nonce,
-               self->metadata, self->metadata_size,
+               self->metadata_data, self->metadata_size,
                "CurveZMQREADY---",
                NULL, NULL);
     return command;
 }
 
-static void
+//  Returns 0 if OK, -1 if command or keys were invalid
+static int
 s_process_ready (curve_codec_t *self, zframe_t *input)
 {
     ready_t *ready = (ready_t *) zframe_data (input);
-    self->metadata_size = zframe_size (input) - sizeof (ready_t);
-    s_decrypt (self, ready->nonce,
-               self->metadata, self->metadata_size,
-               "CurveZMQREADY---",
-               NULL, NULL);
+    size_t size = zframe_size (input) - sizeof (ready_t);
+    byte *plain = zmalloc (size);
+
+    int rc = s_decrypt (self,
+        ready->nonce,
+        plain, size,
+        "CurveZMQREADY---",
+        NULL, NULL);
+
+    //  Metadata comprises entire box
+    s_decode_metadata (self, plain, size);
+    free (plain);
+    return rc;
 }
 
 static zframe_t *
@@ -623,13 +777,14 @@ s_process_message (curve_codec_t *self, zframe_t *input)
     message_t *message = (message_t *) zframe_data (input);
     size_t clear_size = zframe_size (input) - sizeof (message_t);
     byte *clear_data = malloc (clear_size);
-    s_decrypt (self, message->nonce,
-               clear_data, clear_size,
-               self->is_server? "CurveZMQMESSAGEC": "CurveZMQMESSAGES",
-               NULL, NULL);
+    int rc = s_decrypt (self,
+        message->nonce,
+        clear_data, clear_size,
+        self->is_server? "CurveZMQMESSAGEC": "CurveZMQMESSAGES",
+        NULL, NULL);
 
     zframe_t *clear = NULL;
-    if (self->state != errored) {
+    if (rc == 0) {
         //  Create frame with clear text
         clear = zframe_new (clear_data + 1, clear_size - 1);
         zframe_set_more (clear, clear_data [0]);
@@ -685,22 +840,20 @@ s_execute_server (curve_codec_t *self, zframe_t *input)
 {
     command_t command = s_command (self, input);
     if (self->state == expect_hello && command == hello_command) {
-        s_process_hello (self, input);
-        self->state = expect_initiate;
-        return s_produce_welcome (self);
+        if (s_process_hello (self, input) == 0) {
+            self->state = expect_initiate;
+            return s_produce_welcome (self);
+        }
     }
     else
     if (self->state == expect_initiate && command == initiate_command) {
         s_precompute_key (self);
-        s_process_initiate (self, input);
-        self->state = expect_message;
-        return s_produce_ready (self);
+        if (s_process_initiate (self, input) == 0) {
+            self->state = expect_message;
+            return s_produce_ready (self);
+        }
     }
-    else
-    if (self->state == errored)
-        return NULL;
-
-    s_set_error (self, "Invalid command received from client");
+    s_raise_exception (self, "Invalid command received from client");
     return NULL;
 }
 
@@ -716,22 +869,20 @@ s_execute_client (curve_codec_t *self, zframe_t *input)
     }
     else
     if (self->state == expect_welcome && command == welcome_command) {
-        s_process_welcome (self, input);
-        s_precompute_key (self);
-        self->state = expect_ready;
-        return s_produce_initiate (self);
+        if (s_process_welcome (self, input) == 0) {
+            self->state = expect_ready;
+            s_precompute_key (self);
+            return s_produce_initiate (self);
+        }
     }
     else
     if (self->state == expect_ready && command == ready_command) {
-        s_process_ready (self, input);
-        self->state = expect_message;
-        return NULL;
+        if (s_process_ready (self, input) == 0) {
+            self->state = expect_message;
+            return NULL;
+        }
     }
-    else
-    if (self->state == errored)
-        return NULL;
-
-    s_set_error (self, "Invalid command received from server");
+    s_raise_exception (self, "Invalid command received from server");
     return NULL;
 }
 
@@ -788,12 +939,12 @@ curve_codec_decode (curve_codec_t *self, zframe_t **encrypted_p)
         if (s_command (self, *encrypted_p) == message_command)
             cleartext = s_process_message (self, *encrypted_p);
         else
-            s_set_error (self, "Invalid command (expected MESSAGE)");
+            s_raise_exception (self, "Invalid command (expected MESSAGE)");
         zframe_destroy (encrypted_p);
         return cleartext;
     }
     else
-    if (self->state == errored)
+    if (self->state == exception)
         return NULL;
 
     //  A bad state means the API is being misused
@@ -816,10 +967,24 @@ curve_codec_connected (curve_codec_t *self)
 //  Indicate whether codec hit a fatal error
 
 bool
-curve_codec_errored (curve_codec_t *self)
+curve_codec_exception (curve_codec_t *self)
 {
     assert (self);
-    return (self->state == errored);
+    return (self->state == exception);
+}
+
+
+//  --------------------------------------------------------------------------
+//  Returns metadata from peer, as a zhash table. The hash table remains
+//  owned by the codec and the caller should not use it after destroying
+//  the codec. Only valid after the peer has connected. NOTE: All keys
+//  in the hash table are lowercase.
+
+zhash_t *
+curve_codec_metadata (curve_codec_t *self)
+{
+    assert (self);
+    return (self->metadata_recd);
 }
 
 
@@ -835,6 +1000,52 @@ curve_codec_errored (curve_codec_t *self)
 //  both single and multipart messages. A message "END" signals the end
 //  of the test.
 
+//  This is our ZAP authenticator; for now it approves all clients
+
+void zap_authenticator (void *args, zctx_t *ctx, void *pipe)
+{
+    void *handler = zsocket_new (ctx, ZMQ_REP);
+    int rc = zsocket_bind (handler, "inproc://zeromq.zap.01");
+    assert (rc != -1);
+
+    while (true) {
+        zmsg_t *request = zmsg_recv (handler);
+        if (!request)
+            break;              //  Interrupted, so exit thread
+
+        //  Check version number
+        char *version = zmsg_popstr (request);
+        assert (streq (version, "1.0"));
+        free (version);
+
+        //  Get sequence number for use in reply
+        char *sequence = zmsg_popstr (request);
+
+        //  Discard domain, address, and identity
+        free (zmsg_popstr (request));
+        free (zmsg_popstr (request));
+        free (zmsg_popstr (request));
+
+        //  Get and validate mechanism
+        char *mechanism = zmsg_popstr (request);
+        assert (streq (mechanism, "CURVE"));
+        free (mechanism);
+
+        //  Rest of request contains client public key
+        assert (zmsg_size (request) == 1);
+        zmsg_destroy (&request);
+
+        zmsg_t *reply = zmsg_new ();
+        zmsg_addstr (reply, "1.0");       //  ZAP version 1.0
+        zmsg_addstr (reply, sequence);    //  Sequence number
+        zmsg_addstr (reply, "200");
+        zmsg_addstr (reply, "OK");
+        zmsg_addstr (reply, "");
+        zmsg_send (&reply, handler);
+        free (sequence);
+    }
+}
+
 static void *
 server_task (void *args)
 {
@@ -846,16 +1057,19 @@ server_task (void *args)
     int rc = zsocket_bind (router, "tcp://*:9000");
     assert (rc != -1);
 
+    //  Fork a child thread to do ZAP authentication
+    zthread_fork (ctx, zap_authenticator, NULL);
+
     //  Create a new server instance
     curve_keystore_t *keystore = curve_keystore_new ();
     rc = curve_keystore_load (keystore, "test_keystore");
     assert (rc == 0);
-    curve_keypair_t *server_keypair = curve_keystore_get (keystore, "server");
-    assert (server_keypair);
-    curve_codec_t *server = curve_codec_new_server (&server_keypair);
+    curve_keypair_t *keypair = curve_keystore_get (keystore, "server");
+    assert (keypair);
+    curve_codec_t *server = curve_codec_new_server (keypair, ctx);
     assert (server);
+    curve_keypair_destroy (&keypair);
     curve_codec_set_verbose (server, verbose);
-    curve_keystore_destroy (&keystore);
 
     //  Set some metadata properties
     curve_codec_set_metadata (server, "Server", "CURVEZMQ/curve_codec");
@@ -871,6 +1085,11 @@ server_task (void *args)
         zframe_send (&sender, router, ZFRAME_MORE);
         zframe_send (&output, router, 0);
     }
+    //  Check client metadata
+    char *client_name = zhash_lookup (curve_codec_metadata (server), "client");
+    assert (client_name);
+    assert (streq (client_name, "CURVEZMQ/curve_codec"));
+
     bool finished = false;
     while (!finished) {
         //  Now act as echo service doing a full decode and encode
@@ -887,6 +1106,7 @@ server_task (void *args)
         zframe_send (&sender, router, ZFRAME_MORE);
         zframe_send (&encrypted, router, 0);
     }
+    curve_keystore_destroy (&keystore);
     curve_codec_destroy (&server);
     zctx_destroy (&ctx);
     return NULL;
@@ -921,9 +1141,11 @@ curve_codec_test (bool verbose)
     assert (rc != -1);
 
     //  Create a new client instance
-    curve_keypair_t *client_keypair = curve_keystore_get (keystore, "client");
-    curve_codec_t *client = curve_codec_new_client (&client_keypair);
+    curve_keypair_t *keypair = curve_keystore_get (keystore, "client");
+    assert (keypair);
+    curve_codec_t *client = curve_codec_new_client (keypair);
     assert (client);
+    curve_keypair_destroy (&keypair);
     curve_codec_set_verbose (client, verbose);
 
     //  Set some metadata properties
@@ -936,7 +1158,6 @@ curve_codec_test (bool verbose)
     zframe_t *input = zframe_new (curve_keypair_public (server_keypair), 32);
     zframe_t *output = curve_codec_execute (client, &input);
     curve_keypair_destroy (&server_keypair);
-    curve_keystore_destroy (&keystore);
 
     while (!curve_codec_connected (client)) {
         assert (output);
@@ -1025,18 +1246,23 @@ curve_codec_test (bool verbose)
     cleartext = curve_codec_decode (client, &encrypted);
     assert (cleartext);
     zframe_destroy (&cleartext);
+
+    curve_keystore_destroy (&keystore);
     curve_codec_destroy (&client);
 
     //  Some invalid operations to test exception handling
-    curve_keypair_t *unknown = curve_keypair_new ();
-    input = zframe_new (curve_keypair_public (unknown), 32);
-    curve_codec_t *server = curve_codec_new_server (&unknown);
+    keypair = curve_keypair_new ();
+    input = zframe_new (curve_keypair_public (keypair), 32);
+    curve_codec_t *server = curve_codec_new_server (keypair, ctx);
+    curve_keypair_destroy (&keypair);
     curve_codec_execute (server, &input);
-    assert (curve_codec_errored (server));
+    assert (curve_codec_exception (server));
     curve_codec_destroy (&server);
 
     zctx_destroy (&ctx);
     //  @end
 
+    //  Ensure server thread has exited before we do
+    zclock_sleep (100);
     printf ("OK\n");
 }

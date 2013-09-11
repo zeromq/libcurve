@@ -8,15 +8,16 @@ curve_codec - core CurveZMQ engine (rfc.zeromq.org/spec:26)
 SYNOPSIS
 --------
 ----
-//  Create a new curve_codec client instance, providing permanent keypair
-//  for the client. Takes ownership of keypair.
+//  Create a new curve_codec client instance. Caller provides the
+//  permanent keypair for the client.
 CZMQ_EXPORT curve_codec_t *
-    curve_codec_new_client (curve_keypair_t **keypair_p);
+    curve_codec_new_client (curve_keypair_t *keypair);
 
-//  Create a new curve_codec server instance, providing permanent keypair
-//  for the server. Takes ownership of keypair.
+//  Create a new curve_codec server instance. Caller provides the
+//  permanent keypair for the server, and optionally a context used
+//  for inproc authentication of client keys over ZAP (0MQ RFC 27).
 CZMQ_EXPORT curve_codec_t *
-    curve_codec_new_server (curve_keypair_t **keypair_p);
+    curve_codec_new_server (curve_keypair_t *keypair, zctx_t *ctx);
 
 //  Destructor
 CZMQ_EXPORT void
@@ -58,7 +59,14 @@ CZMQ_EXPORT bool
 
 //  Indicate whether codec hit a fatal error
 CZMQ_EXPORT bool
-    curve_codec_errored (curve_codec_t *self);
+    curve_codec_exception (curve_codec_t *self);
+
+//  Returns metadata from peer, as a zhash table. The hash table remains
+//  owned by the codec and the caller should not use it after destroying
+//  the codec. Only valid after the peer has connected. NOTE: All keys
+//  in the hash table are lowercase.
+CZMQ_EXPORT zhash_t *
+    curve_codec_metadata (curve_codec_t *self);
 
 //  Self test of this class
 void
@@ -72,44 +80,93 @@ Implements the client and server codecs. This class encodes and decodes
 zframes. All I/O is the responsibility of the caller. This is the
 reference implementation of CurveZMQ. You will not normally want to use
 it directly in application code as the API is low-level and complex.
-TODO: authentication via ZAP - http://rfc.zeromq.org/spec:27/ZAP
 
 
 EXAMPLE
 -------
 .From curve_codec_test method
 ----
+//  For the test case, we'll put the client and server keypairs into the
+//  the same keystore file. This is now how it would work in real life.
+//
+//  The test case consists of the client sending a series of messages to
+//  the server, which the server has to echo back. The client will send
+//  both single and multipart messages. A message "END" signals the end
+//  of the test.
 
-//  For the test case, we'll put the client and server keypairs into static
-//  variables both threads can share. This is not how you'd do it practice.
+//  This is our ZAP authenticator; for now it approves all clients
 
-void *
+void zap_authenticator (void *args, zctx_t *ctx, void *pipe)
+{
+    void *handler = zsocket_new (ctx, ZMQ_REP);
+    int rc = zsocket_bind (handler, "inproc://zeromq.zap.01");
+    assert (rc != -1);
+
+    while (true) {
+        zmsg_t *request = zmsg_recv (handler);
+        if (!request)
+            break;              //  Interrupted, so exit thread
+
+        //  Check version number
+        char *version = zmsg_popstr (request);
+        assert (streq (version, "1.0"));
+        free (version);
+
+        //  Get sequence number for use in reply
+        char *sequence = zmsg_popstr (request);
+
+        //  Discard domain, address, and identity
+        free (zmsg_popstr (request));
+        free (zmsg_popstr (request));
+        free (zmsg_popstr (request));
+
+        //  Get and validate mechanism
+        char *mechanism = zmsg_popstr (request);
+        assert (streq (mechanism, "CURVE"));
+        free (mechanism);
+
+        //  Rest of request contains client public key
+        assert (zmsg_size (request) == 1);
+        zmsg_destroy (&request);
+
+        zmsg_t *reply = zmsg_new ();
+        zmsg_addstr (reply, "1.0");       //  ZAP version 1.0
+        zmsg_addstr (reply, sequence);    //  Sequence number
+        zmsg_addstr (reply, "200");
+        zmsg_addstr (reply, "OK");
+        zmsg_addstr (reply, "");
+        zmsg_send (&reply, handler);
+        free (sequence);
+    }
+}
+
+static void *
 server_task (void *args)
 {
+    bool verbose = *((bool *) args);
+
     zctx_t *ctx = zctx_new ();
     assert (ctx);
     void *router = zsocket_new (ctx, ZMQ_ROUTER);
     int rc = zsocket_bind (router, "tcp://*:9000");
     assert (rc != -1);
 
-    //  Create a new server instance and load its keys from the previously
-    //  generated keystore
+    //  Fork a child thread to do ZAP authentication
+    zthread_fork (ctx, zap_authenticator, NULL);
+
+    //  Create a new server instance
     curve_keystore_t *keystore = curve_keystore_new ();
-    rc = curve_keystore_load (keystore, ".keystore");
+    rc = curve_keystore_load (keystore, "test_keystore");
     assert (rc == 0);
-    curve_keypair_t *server_keypair = curve_keystore_get (keystore, "server");
-    assert (server_keypair);
-    curve_codec_t *server = curve_codec_new_server (&server_keypair);
+    curve_keypair_t *keypair = curve_keystore_get (keystore, "server");
+    assert (keypair);
+    curve_codec_t *server = curve_codec_new_server (keypair, ctx);
     assert (server);
-    curve_codec_set_verbose (server, (bool *) args);
-    curve_keystore_destroy (&keystore);
+    curve_keypair_destroy (&keypair);
+    curve_codec_set_verbose (server, verbose);
 
     //  Set some metadata properties
     curve_codec_set_metadata (server, "Server", "CURVEZMQ/curve_codec");
-
-    //  A hack to get the thread to timeout and exit so we can test
-    //  under Valgrind. Do NOT do this on real servers!
-    zsocket_set_rcvtimeo (router, 1000);
 
     //  Execute incoming frames until ready or exception
     //  In practice we'd want a server instance per unique client
@@ -122,44 +179,35 @@ server_task (void *args)
         zframe_send (&sender, router, ZFRAME_MORE);
         zframe_send (&output, router, 0);
     }
-    while (true) {
+    //  Check client metadata
+    char *client_name = zhash_lookup (curve_codec_metadata (server), "client");
+    assert (client_name);
+    assert (streq (client_name, "CURVEZMQ/curve_codec"));
+
+    bool finished = false;
+    while (!finished) {
         //  Now act as echo service doing a full decode and encode
-        //  Finish when we get an END message
         zframe_t *sender = zframe_recv (router);
-        if (!sender)
-            break;          //  Timed-out, finished
         zframe_t *encrypted = zframe_recv (router);
         assert (encrypted);
         zframe_t *cleartext = curve_codec_decode (server, &encrypted);
         assert (cleartext);
-
+        if (memcmp (cleartext, "END", 3) == 0)
+            finished = true;
+        //  Echo message back
         encrypted = curve_codec_encode (server, &cleartext);
         assert (encrypted);
         zframe_send (&sender, router, ZFRAME_MORE);
         zframe_send (&encrypted, router, 0);
     }
+    curve_keystore_destroy (&keystore);
     curve_codec_destroy (&server);
     zctx_destroy (&ctx);
     return NULL;
 }
-    //  Create a keystore for this test scenario
-    //  We will create two permanent keypairs, "server" and "client"
-    //  Note that in practice client and server would NOT see each
-    //  others' secret keys. Using a shared .keystore file just makes
-    //  our testing easier here.
     curve_keystore_t *keystore = curve_keystore_new ();
-    curve_keypair_t *client_keypair = curve_keypair_new ();
-    curve_keystore_put (keystore, "client", client_keypair);
-    curve_keypair_t *server_keypair = curve_keypair_new ();
-    curve_keystore_put (keystore, "server", server_keypair);
-    int rc = curve_keystore_save (keystore, ".keystore");
+    int rc = curve_keystore_load (keystore, "test_keystore");
     assert (rc == 0);
-    assert (zfile_exists (".keystore"));
-    curve_keystore_destroy (&keystore);
-
-    //  We'll run the server as a background task, and the
-    //  client in this foreground thread.
-    zthread_new (server_task, &verbose);
 
     zctx_t *ctx = zctx_new ();
     assert (ctx);
@@ -168,8 +216,11 @@ server_task (void *args)
     assert (rc != -1);
 
     //  Create a new client instance
-    curve_codec_t *client = curve_codec_new_client (&client_keypair);
+    curve_keypair_t *keypair = curve_keystore_get (keystore, "client");
+    assert (keypair);
+    curve_codec_t *client = curve_codec_new_client (keypair);
     assert (client);
+    curve_keypair_destroy (&keypair);
     curve_codec_set_verbose (client, verbose);
 
     //  Set some metadata properties
@@ -178,6 +229,7 @@ server_task (void *args)
 
     //  Kick off client handshake
     //  First frame to new client is server's public key
+    curve_keypair_t *server_keypair = curve_keystore_get (keystore, "server");
     zframe_t *input = zframe_new (curve_keypair_public (server_keypair), 32);
     zframe_t *output = curve_codec_execute (client, &input);
     curve_keypair_destroy (&server_keypair);
@@ -198,7 +250,6 @@ server_task (void *args)
 
     encrypted = zframe_recv (dealer);
     assert (encrypted);
-
     cleartext = curve_codec_decode (client, &encrypted);
     assert (cleartext);
     assert (zframe_size (cleartext) == 12);
@@ -211,11 +262,23 @@ server_task (void *args)
     encrypted = curve_codec_encode (client, &cleartext);
     assert (encrypted);
     zframe_send (&encrypted, dealer, 0);
+    cleartext = zframe_new ((byte *) "Second frame", 12);
+    encrypted = curve_codec_encode (client, &cleartext);
+    assert (encrypted);
+    zframe_send (&encrypted, dealer, 0);
 
     encrypted = zframe_recv (dealer);
+    assert (encrypted);
     cleartext = curve_codec_decode (client, &encrypted);
     assert (cleartext);
     assert (zframe_more (cleartext) == 1);
+    zframe_destroy (&cleartext);
+
+    encrypted = zframe_recv (dealer);
+    assert (encrypted);
+    cleartext = curve_codec_decode (client, &encrypted);
+    assert (cleartext);
+    assert (zframe_more (cleartext) == 0);
     zframe_destroy (&cleartext);
 
     //  Now send messages of increasing size, check they work
@@ -224,6 +287,7 @@ server_task (void *args)
     for (count = 0; count < 18; count++) {
         if (verbose)
             printf ("Testing message of size=%d...\n", size);
+
         cleartext = zframe_new (NULL, size);
         int byte_nbr;
         //  Set data to sequence 0...255 repeated
@@ -243,18 +307,31 @@ server_task (void *args)
             assert (zframe_data (cleartext)[byte_nbr] == (byte) byte_nbr);
         }
         zframe_destroy (&cleartext);
+
         size = size * 2 + 1;
     }
-    //  Give server thread a chance to time-out and exit
-    zclock_sleep (1000);
+    //  Signal end of test
+    cleartext = zframe_new ((byte *) "END", 3);
+    encrypted = curve_codec_encode (client, &cleartext);
+    assert (encrypted);
+    zframe_send (&encrypted, dealer, 0);
+
+    encrypted = zframe_recv (dealer);
+    assert (encrypted);
+    cleartext = curve_codec_decode (client, &encrypted);
+    assert (cleartext);
+    zframe_destroy (&cleartext);
+
+    curve_keystore_destroy (&keystore);
     curve_codec_destroy (&client);
 
     //  Some invalid operations to test exception handling
-    curve_keypair_t *unknown = curve_keypair_new ();
-    input = zframe_new (curve_keypair_public (unknown), 32);
-    curve_codec_t *server = curve_codec_new_server (&unknown);
+    keypair = curve_keypair_new ();
+    input = zframe_new (curve_keypair_public (keypair), 32);
+    curve_codec_t *server = curve_codec_new_server (keypair, ctx);
+    curve_keypair_destroy (&keypair);
     curve_codec_execute (server, &input);
-    assert (curve_codec_errored (server));
+    assert (curve_codec_exception (server));
     curve_codec_destroy (&server);
 
     zctx_destroy (&ctx);
