@@ -105,9 +105,7 @@ curve_client_set_metadata (curve_client_t *self, char *name, char *format, ...)
     vsnprintf (value, 255, format, argptr);
     va_end (argptr);
 
-    zstr_sendm (self->control, "SET");
-    zstr_sendm (self->control, name);
-    zstr_send  (self->control, value);
+    zstr_sendx (self->control, "SET", name, value, NULL);
     free (value);
 }
 
@@ -147,8 +145,7 @@ void
 curve_client_disconnect (curve_client_t *self, char *endpoint)
 {
     assert (self);
-    zstr_sendm (self->control, "DISCONNECT");
-    zstr_send  (self->control, endpoint);
+    zstr_sendx (self->control, "DISCONNECT", endpoint, NULL);
 }
 
 
@@ -450,6 +447,7 @@ server_task (void *args)
     assert (server);
     curve_keypair_destroy (&keypair);
     curve_codec_set_verbose (server, verbose);
+curve_codec_set_verbose (server, true);
 
     //  Set some metadata properties
     curve_codec_set_metadata (server, "Server", "CURVEZMQ/curve_codec");
@@ -519,8 +517,8 @@ curve_client_test (bool verbose)
 
     //  Try a multipart message
     zmsg_t *msg = zmsg_new ();
-    zmsg_pushstr (msg, "Hello, World");
-    zmsg_pushstr (msg, "Second frame");
+    zmsg_addstr (msg, "Hello, World");
+    zmsg_addstr (msg, "Second frame");
     curve_client_send (client, &msg);
     msg = curve_client_recv (client);
     assert (zmsg_size (msg) == 2);

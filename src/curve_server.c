@@ -104,9 +104,7 @@ curve_server_set_metadata (curve_server_t *self, char *name, char *format, ...)
     vsnprintf (value, 255, format, argptr);
     va_end (argptr);
 
-    zstr_sendm (self->control, "SET");
-    zstr_sendm (self->control, name);
-    zstr_send  (self->control, value);
+    zstr_sendx (self->control, "SET", name, value, NULL);
     free (value);
 }
 
@@ -178,8 +176,7 @@ void
 curve_server_bind (curve_server_t *self, char *endpoint)
 {
     assert (self);
-    zstr_sendm (self->control, "BIND");
-    zstr_send  (self->control, endpoint);
+    zstr_sendx (self->control, "BIND", endpoint, NULL);
 }
 
 
@@ -190,8 +187,7 @@ void
 curve_server_unbind (curve_server_t *self, char *endpoint)
 {
     assert (self);
-    zstr_sendm (self->control, "UNBIND");
-    zstr_send  (self->control, endpoint);
+    zstr_sendx (self->control, "UNBIND", endpoint, NULL);
 }
 
 
@@ -619,8 +615,8 @@ client_task (void *args)
 
     //  Try a multipart message
     zmsg_t *msg = zmsg_new ();
-    zmsg_pushstr (msg, "Hello, World");
-    zmsg_pushstr (msg, "Second frame");
+    zmsg_addstr (msg, "Hello, World");
+    zmsg_addstr (msg, "Second frame");
     curve_client_send (client, &msg);
     msg = curve_client_recv (client);
     assert (zmsg_size (msg) == 2);
