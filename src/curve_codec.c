@@ -117,7 +117,7 @@ typedef struct {
     char id [sizeof ("INITIATE")];
     byte cookie [96];           //  Server-provided cookie
     byte nonce [8];             //  Short nonce, prefixed by "CurveZMQINITIATE"
-    byte box [112];             //  Box [C + vouch + metadata](C'->S')
+    byte box [144];             //  Box [C + vouch + metadata](C'->S')
 } initiate_t;
 
 typedef struct {
@@ -459,12 +459,14 @@ s_authenticate_peer (curve_codec_t *self)
 
     //  Create a socket for the ZAP request; we'll destroy this as soon
     //  as the request is done, to avoid old sockets accumulating in the
-    //  parent context.
+    //  parent context. To check if there is a ZAP handler installed, we
+    //  try to bind to the ZAP endpoint and only continue if that failed.
     void *requestor = zsocket_new (self->ctx, ZMQ_REQ);
-    if (zsocket_connect (requestor, "inproc://zeromq.zap.01") == -1) {
+    if (zsocket_bind (requestor, "inproc://zeromq.zap.01") == 0) {
         zsocket_destroy (self->ctx, requestor);
         return 0;                       //  ZAP not installed
     }
+    zsocket_connect (requestor, "inproc://zeromq.zap.01");
     zmsg_t *request = zmsg_new ();
     zmsg_addstr (request, "1.0");       //  ZAP version 1.0
     zmsg_addstr (request, "");          //  Sequence number, unused
@@ -620,25 +622,27 @@ s_produce_initiate (curve_codec_t *self)
     memcpy (initiate->id, "\x08INITIATE", 9);
     memcpy (initiate->cookie, self->cookie, sizeof (initiate->cookie));
 
-    //  Create vouch = Box [C'](C->S)
-    byte vouch [64];
-    s_encrypt (self, vouch,
-               curve_keypair_public (self->transkey), 32,
+    //  Create vouch = Box [C',S](C->S')
+    byte vouch_plain [64];           //  Space for plain text vouch
+    byte vouch_crypt [96];
+    memcpy (vouch_plain, curve_keypair_public (self->transkey), 32);
+    memcpy (vouch_plain + 32, self->peer_permakey, 32);
+    s_encrypt (self, vouch_crypt,
+               vouch_plain, 64,
                "VOUCH---",
-               self->peer_permakey,     //  Server public key
-               curve_keypair_secret (self->permakey));
+               NULL, NULL);
 
     //  Working variables for crypto calls
-    size_t box_size = 96 + self->metadata_size;
+    size_t box_size = 128 + self->metadata_size;
     byte *plain = malloc (box_size);
     byte *box = malloc (box_size);
 
     //  Create Box [C + vouch + metadata](C'->S')
     memcpy (plain, curve_keypair_public (self->permakey), 32);
-    memcpy (plain + 32, vouch, 64);
-    memcpy (plain + 96, self->metadata_data, self->metadata_size);
+    memcpy (plain + 32, vouch_crypt, 96);
+    memcpy (plain + 128, self->metadata_data, self->metadata_size);
     s_encrypt (self, initiate->nonce,
-               plain, 96 + self->metadata_size,
+               plain, 128 + self->metadata_size,
                "CurveZMQINITIATE",
                NULL, NULL);
     free (plain);
@@ -656,7 +660,7 @@ s_process_initiate (curve_codec_t *self, zframe_t *input)
 
     initiate_t *initiate = (initiate_t *) zframe_data (input);
     size_t metadata_size = zframe_size (input) - sizeof (initiate_t);
-    size_t box_size = crypto_box_ZEROBYTES + 96 + metadata_size;
+    size_t box_size = crypto_box_ZEROBYTES + 128 + metadata_size;
     byte *plain = malloc (box_size);
     byte *box = malloc (box_size);
 
@@ -685,7 +689,7 @@ s_process_initiate (curve_codec_t *self, zframe_t *input)
         //  Open Box [C + vouch + metadata](C'->S')
         rc = s_decrypt (self,
             initiate->nonce,
-            plain, 96 + metadata_size,
+            plain, 128 + metadata_size,
             "CurveZMQINITIATE",
             NULL, NULL);
 
@@ -695,20 +699,21 @@ s_process_initiate (curve_codec_t *self, zframe_t *input)
             rc = -1;            //  Authentication failed
     }
     if (rc == 0) {
-        s_decode_metadata (self, plain + 96, metadata_size);
+        s_decode_metadata (self, plain + 128, metadata_size);
 
-        //  Vouch nonce + box is 64 bytes at plain + 32
-        byte vouch [64];
-        memcpy (vouch, plain + 32, 64);
+        //  Vouch nonce + box is 96 bytes at (plain + 32)
+        byte vouch [96];
+        memcpy (vouch, plain + 32, 96);
         int rc = s_decrypt (self,
             vouch,
-            plain, 32,
+            plain, 64,
             "VOUCH---",
-            self->peer_permakey,    //  Client permanent key
-            curve_keypair_secret (self->permakey));
+            NULL, NULL);
 
-        //  Check vouch is short term client public key
-        if (rc == 0 && memcmp (plain, self->peer_transkey, 32))
+        //  Check vouch is short term client public key plus our public key
+        if (rc == 0 
+        && (memcmp (plain, self->peer_transkey, 32)
+        ||  memcmp (plain + 32, curve_keypair_public (self->permakey), 32)))
             rc = -1;
     }
     free (plain);
@@ -804,25 +809,21 @@ s_command (curve_codec_t *self, zframe_t *input)
         byte *data = zframe_data (input);
         if (size == sizeof (hello_t) && memcmp (data, "\x05HELLO", 6) == 0) {
             if (self->verbose)
-                puts ("Received C:HELLO");
             return hello_command;
         }
         else
         if (size >= sizeof (initiate_t) && memcmp (data, "\x08INITIATE", 9) == 0) {
             if (self->verbose)
-                puts ("Received C:INITIATE");
             return initiate_command;
         }
         else
         if (size == sizeof (welcome_t) && memcmp (data, "\x07WELCOME", 8) == 0) {
             if (self->verbose)
-                puts ("Received S:WELCOME");
             return welcome_command;
         }
         else
         if (size >= sizeof (ready_t) && memcmp (data, "\x05READY", 6) == 0) {
             if (self->verbose)
-                puts ("Received S:READY");
             return ready_command;
         }
         else
@@ -1003,7 +1004,8 @@ curve_codec_metadata (curve_codec_t *self)
 
 //  This is our ZAP authenticator; for now it approves all clients
 
-void zap_authenticator (void *args, zctx_t *ctx, void *pipe)
+static void
+zap_authenticator (void *args, zctx_t *ctx, void *pipe)
 {
     void *handler = zsocket_new (ctx, ZMQ_REP);
     int rc = zsocket_bind (handler, "inproc://zeromq.zap.01");
@@ -1036,13 +1038,7 @@ void zap_authenticator (void *args, zctx_t *ctx, void *pipe)
         assert (zmsg_size (request) == 1);
         zmsg_destroy (&request);
 
-        zmsg_t *reply = zmsg_new ();
-        zmsg_addstr (reply, "1.0");       //  ZAP version 1.0
-        zmsg_addstr (reply, sequence);    //  Sequence number
-        zmsg_addstr (reply, "200");
-        zmsg_addstr (reply, "OK");
-        zmsg_addstr (reply, "");
-        zmsg_send (&reply, handler);
+        zstr_sendx (handler, "1.0", sequence, "200", "OK", "", "", NULL);
         free (sequence);
     }
 }
@@ -1122,7 +1118,7 @@ curve_codec_test (bool verbose)
     //  Check compiler isn't padding our structures mysteriously
     assert (sizeof (hello_t) == 200);
     assert (sizeof (welcome_t) == 168);
-    assert (sizeof (initiate_t) == 225);
+    assert (sizeof (initiate_t) == 257);
     assert (sizeof (ready_t) == 30);
     assert (sizeof (message_t) == 32);
 
