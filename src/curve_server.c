@@ -36,9 +36,9 @@
 
 //  Structure of our class
 struct _curve_server_t {
+    zctx_t *ctx;                //  Our parent context
     void *control;              //  Control to/from agent
     void *data;                 //  Data to/from agent
-    zctx_t *ctx;                //  Private context
 };
 
 //  This background thread does all the real work
@@ -47,16 +47,16 @@ static void
 
 //  --------------------------------------------------------------------------
 //  Constructor
-//  Create a new curve_server instance
-//  We use a context per instance to keep the API as simple as possible.
-//  Takes ownership of keypair.
+//  Create a new server instance, providing its permanent cert
+//  The caller provides the ZeroMQ context so that it can also
+//  attach an authenticator (zauth) to the same context.
 
 curve_server_t *
-curve_server_new (curve_keypair_t **keypair_p)
+curve_server_new (zctx_t *ctx, zcert_t **cert_p)
 {
     curve_server_t *self = (curve_server_t *) zmalloc (sizeof (curve_server_t));
     assert (self);
-    self->ctx = zctx_new ();
+    self->ctx = ctx;
     self->control = zthread_fork (self->ctx, s_agent_task, NULL);
 
     //  Create separate data socket, send address on control socket
@@ -65,9 +65,13 @@ curve_server_new (curve_keypair_t **keypair_p)
     int rc = zsocket_bind (self->data, "inproc://data-%p", self->data);
     assert (rc != -1);
     zstr_sendm (self->control, "inproc://data-%p", self->data);
-    //  Now send keypair on control socket as well
-    curve_keypair_send (*keypair_p, self->control);
-    curve_keypair_destroy (keypair_p);
+    
+    //  Now send cert on control socket as well
+    rc = zmq_send (self->control, zcert_public_key (*cert_p), 32, ZMQ_SNDMORE);
+    assert (rc == 32);
+    rc = zmq_send (self->control, zcert_secret_key (*cert_p), 32, 0);
+    assert (rc == 32);
+    zcert_destroy (cert_p);
 
     return self;
 }
@@ -84,7 +88,6 @@ curve_server_destroy (curve_server_t **self_p)
         curve_server_t *self = *self_p;
         zstr_send (self->control, "TERMINATE");
         free (zstr_recv (self->control));
-        zctx_destroy (&self->ctx);
         free (self);
         *self_p = NULL;
     }
@@ -104,9 +107,7 @@ curve_server_set_metadata (curve_server_t *self, char *name, char *format, ...)
     vsnprintf (value, 255, format, argptr);
     va_end (argptr);
 
-    zstr_sendm (self->control, "SET");
-    zstr_sendm (self->control, name);
-    zstr_send  (self->control, value);
+    zstr_sendx (self->control, "SET", name, value, NULL);
     free (value);
 }
 
@@ -178,8 +179,7 @@ void
 curve_server_bind (curve_server_t *self, char *endpoint)
 {
     assert (self);
-    zstr_sendm (self->control, "BIND");
-    zstr_send  (self->control, endpoint);
+    zstr_sendx (self->control, "BIND", endpoint, NULL);
 }
 
 
@@ -190,8 +190,7 @@ void
 curve_server_unbind (curve_server_t *self, char *endpoint)
 {
     assert (self);
-    zstr_sendm (self->control, "UNBIND");
-    zstr_send  (self->control, endpoint);
+    zstr_sendx (self->control, "UNBIND", endpoint, NULL);
 }
 
 
@@ -244,7 +243,7 @@ typedef struct {
     void *control;              //  Control socket back to application
     void *data;                 //  Data socket to application
     void *router;               //  ROUTER socket to server
-    curve_keypair_t *keypair;   //  Server long term keypair
+    zcert_t *cert;   //  Server long term cert
     size_t nbr_clients;         //  Number of authenticated clients
     size_t nbr_pending;         //  Number of pending authentications
     size_t max_clients;         //  Max authenticated clients
@@ -272,7 +271,15 @@ s_agent_new (zctx_t *ctx, void *control)
     assert (rc != -1);
     free (endpoint);
 
-    self->keypair = curve_keypair_recv (self->control);
+    //  Create new client codec using cert from API
+    byte public_key [32];
+    byte secret_key [32];
+    rc = zmq_recv (self->control, public_key, 32, 0);
+    assert (rc == 32);
+    rc = zmq_recv (self->control, secret_key, 32, 0);
+    assert (rc == 32);
+    self->cert = zcert_new_from (public_key, secret_key);
+        
     self->metadata = zhash_new ();
     zhash_autofree (self->metadata);
     self->clients = zhash_new ();
@@ -289,7 +296,7 @@ s_agent_destroy (agent_t **self_p)
     assert (self_p);
     if (*self_p) {
         agent_t *self = *self_p;
-        curve_keypair_destroy (&self->keypair);
+        zcert_destroy (&self->cert);
         zhash_destroy (&self->metadata);
         zhash_destroy (&self->clients);
         free (self);
@@ -321,7 +328,7 @@ client_new (agent_t *agent, zframe_t *address)
     client_t *self = (client_t *) zmalloc (sizeof (client_t));
     assert (self);
     self->agent = agent;
-    self->codec = curve_codec_new_server (agent->keypair, agent->ctx);
+    self->codec = curve_codec_new_server (agent->cert, agent->ctx);
     self->address = zframe_dup (address);
     self->hashkey = zframe_strhex (address);
     return self;
@@ -512,7 +519,7 @@ s_agent_handle_router (agent_t *self)
             zmsg_add (client->incoming, cleartext);
             if (!zframe_more (cleartext)) {
                 zmsg_pushstr (client->incoming, client->hashkey);
-                zmsg_send (&client->incoming, self->control);
+                zmsg_send (&client->incoming, self->data);
             }
         }
         else
@@ -595,22 +602,22 @@ s_agent_task (void *args, zctx_t *ctx, void *control)
 //  --------------------------------------------------------------------------
 //  Selftest
 
+#define TESTDIR ".test_curve_server"
+
 static void *
 client_task (void *args)
 {
-    //  This is the curve_codec client selftest, runs as background thread
-    curve_keystore_t *keystore = curve_keystore_new ();
-    int rc = curve_keystore_load (keystore, "test_keystore");
-    assert (rc == 0);
+    bool verbose = *((bool *) args);
+    
+    zcert_t *client_cert = zcert_new ();
+    zcert_save_public (client_cert, TESTDIR "/client-%07d.cert", randof (10000000));
+    curve_client_t *client = curve_client_new (&client_cert);
+    curve_client_set_verbose (client, verbose);
 
-    curve_keypair_t *client_keypair = curve_keystore_get (keystore, "client");
-    curve_client_t *client = curve_client_new (&client_keypair);
-    curve_client_set_metadata (client, "Client", "CURVEZMQ/curve_client");
-    curve_client_set_metadata (client, "Identity", "%d", randof (1000));
-
-    curve_keypair_t *server_keypair = curve_keystore_get (keystore, "server");
-    curve_client_connect (client, "tcp://127.0.0.1:9000", curve_keypair_public (server_keypair));
-    curve_keypair_destroy (&server_keypair);
+    zcert_t *server_cert = zcert_load (TESTDIR "/server.cert");
+    assert (server_cert);
+    curve_client_connect (client, "tcp://127.0.0.1:9000", zcert_public_key (server_cert));
+    zcert_destroy (&server_cert);
 
     curve_client_sendstr (client, "Hello, World");
     char *reply = curve_client_recvstr (client);
@@ -619,8 +626,8 @@ client_task (void *args)
 
     //  Try a multipart message
     zmsg_t *msg = zmsg_new ();
-    zmsg_pushstr (msg, "Hello, World");
-    zmsg_pushstr (msg, "Second frame");
+    zmsg_addstr (msg, "Hello, World");
+    zmsg_addstr (msg, "Second frame");
     curve_client_send (client, &msg);
     msg = curve_client_recv (client);
     assert (zmsg_size (msg) == 2);
@@ -655,7 +662,6 @@ client_task (void *args)
     reply = curve_client_recvstr (client);
     free (reply);
 
-    curve_keystore_destroy (&keystore);
     curve_client_destroy (&client);
     return NULL;
 }
@@ -665,24 +671,32 @@ curve_server_test (bool verbose)
 {
     printf (" * curve_server: ");
 
+    //  @selftest
+    //  Create temporary directory for test files
+    srand (time (NULL));
+    zsys_dir_create (TESTDIR);
+    
+    zcert_t *server_cert = zcert_new ();
+    zcert_save (server_cert, TESTDIR "/server.cert");
+
+    //  Install the authenticator
+    zctx_t *ctx = zctx_new ();
+    zauth_t *auth = zauth_new (ctx);
+    assert (auth);
+    zauth_set_verbose (auth, verbose);
+    zauth_configure_curve (auth, "*", TESTDIR);
+    
     //  We'll run a set of clients as background tasks, and the
     //  server in this foreground thread. Don't pass verbose to
     //  the clients as the results are unreadable.
     int live_clients;
-    for (live_clients = 0; live_clients < 0; live_clients++)
-        zthread_new (client_task, NULL);
+    for (live_clients = 0; live_clients < 5; live_clients++)
+        zthread_new (client_task, &verbose);
 
-    //  @selftest
-    curve_keystore_t *keystore = curve_keystore_new ();
-    int rc = curve_keystore_load (keystore, "test_keystore");
-    assert (rc == 0);
-
-    curve_keypair_t *server_keypair = curve_keystore_get (keystore, "server");
-    curve_server_t *server = curve_server_new (&server_keypair);
-    curve_server_set_metadata (server, "Server", "CURVEZMQ/curve_server");
+    curve_server_t *server = curve_server_new (ctx, &server_cert);
     curve_server_set_verbose (server, verbose);
     curve_server_bind (server, "tcp://*:9000");
-
+    
     while (live_clients > 0) {
         zmsg_t *msg = curve_server_recv (server);
         if (memcmp (zframe_data (zmsg_last (msg)), "END", 3) == 0)
@@ -692,7 +706,7 @@ curve_server_test (bool verbose)
 
     //  Try an invalid client/server combination
     byte bad_server_key [32] = { 0 };
-    curve_keypair_t *unknown = curve_keypair_new ();
+    zcert_t *unknown = zcert_new ();
     curve_client_t *client = curve_client_new (&unknown);
     curve_client_set_verbose (client, true);
     curve_client_connect (client, "tcp://127.0.0.1:9000", bad_server_key);
@@ -704,11 +718,17 @@ curve_server_test (bool verbose)
     };
     assert (zmq_poll (pollitems, 1, 250) == 0);
     curve_client_destroy (&client);
-
-    curve_keystore_destroy (&keystore);
+ 
+    //  Delete all test files
+    zdir_t *dir = zdir_new (TESTDIR, NULL);
+    zdir_remove (dir, true);
+    zdir_destroy (&dir);
+    
     curve_server_destroy (&server);
+    zauth_destroy (&auth);
+    zctx_destroy (&ctx);
     //  @end
-
+   
     //  Ensure client threads have exited before we do
     zclock_sleep (100);
     printf ("OK\n");
