@@ -36,6 +36,7 @@ typedef struct _curve_keypair_t curve_keypair_t;
 //  Constructor, creates a new public/secret key pair
 CZMQ_EXPORT curve_keypair_t *
     curve_keypair_new (void);
+
 //  Constructor, accepts public/secret key pair from caller
 CZMQ_EXPORT curve_keypair_t *
     curve_keypair_new_from (byte *public_key, byte *secret_key);

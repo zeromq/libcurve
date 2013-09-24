@@ -35,9 +35,9 @@ typedef struct _curve_client_t curve_client_t;
 //  @interface
 //  Create a new curve_client instance.
 //  We use a context per instance to keep the API as simple as possible.
-//  Takes ownership of keypair.
+//  Takes ownership of cert.
 CZMQ_EXPORT curve_client_t *
-    curve_client_new (curve_keypair_t **keypair_p);
+    curve_client_new (zcert_t **cert_p);
 
 //  Destructor
 CZMQ_EXPORT void

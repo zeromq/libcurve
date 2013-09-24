@@ -68,10 +68,8 @@ typedef enum {
 //  Structure of our class
 struct _curve_codec_t {
     zctx_t *ctx;                //  Context for ZAP authentication
-    curve_keypair_t
-        *permakey;              //  Our permanent key
-    curve_keypair_t
-        *transkey;              //  Our transient key
+    zcert_t *permacert;         //  Our permanent certificate
+    zcert_t *transcert;         //  Our transient certificate
 
     bool verbose;               //  Trace activity to stdout
     state_t state;              //  Current codec state
@@ -117,7 +115,7 @@ typedef struct {
     char id [sizeof ("INITIATE")];
     byte cookie [96];           //  Server-provided cookie
     byte nonce [8];             //  Short nonce, prefixed by "CurveZMQINITIATE"
-    byte box [112];             //  Box [C + vouch + metadata](C'->S')
+    byte box [144];             //  Box [C + vouch + metadata](C'->S')
 } initiate_t;
 
 typedef struct {
@@ -136,14 +134,14 @@ typedef struct {
 //  --------------------------------------------------------------------------
 //  Constructors
 //  Create a new curve_codec client instance. Caller provides the
-//  permanent keypair for the client.
+//  permanent certificate for the client.
 
 curve_codec_t *
-curve_codec_new_client (curve_keypair_t *keypair)
+curve_codec_new_client (zcert_t *cert)
 {
     curve_codec_t *self = (curve_codec_t *) zmalloc (sizeof (curve_codec_t));
     assert (self);
-    assert (keypair);
+    assert (cert);
 
     self->is_server = false;
     self->state = send_hello;
@@ -152,8 +150,8 @@ curve_codec_new_client (curve_keypair_t *keypair)
     zhash_autofree (self->metadata_sent);
     self->metadata_recd = zhash_new ();
     zhash_autofree (self->metadata_recd);
-    self->permakey = curve_keypair_dup (keypair);
-    self->transkey = curve_keypair_new ();
+    self->permacert = zcert_dup (cert);
+    self->transcert = zcert_new ();
 
     return self;
 }
@@ -161,15 +159,15 @@ curve_codec_new_client (curve_keypair_t *keypair)
 
 //  --------------------------------------------------------------------------
 //  Create a new curve_codec server instance. Caller provides the
-//  permanent keypair for the server, and optionally a context used
+//  permanent cert for the server, and optionally a context used
 //  for inproc authentication of client keys over ZAP (0MQ RFC 27).
 
 curve_codec_t *
-curve_codec_new_server (curve_keypair_t *keypair, zctx_t *ctx)
+curve_codec_new_server (zcert_t *cert, zctx_t *ctx)
 {
     curve_codec_t *self = (curve_codec_t *) zmalloc (sizeof (curve_codec_t));
     assert (self);
-    assert (keypair);
+    assert (cert);
 
     self->ctx = ctx;
     self->is_server = true;
@@ -179,8 +177,8 @@ curve_codec_new_server (curve_keypair_t *keypair, zctx_t *ctx)
     zhash_autofree (self->metadata_sent);
     self->metadata_recd = zhash_new ();
     zhash_autofree (self->metadata_recd);
-    self->permakey = curve_keypair_dup (keypair);
-    //  We don't generate a transient keypair yet because that uses up
+    self->permacert = zcert_dup (cert);
+    //  We don't generate a transient cert yet because that uses up
     //  entropy so would allow arbitrary clients to do a DoS attack.
 
     return self;
@@ -196,8 +194,8 @@ curve_codec_destroy (curve_codec_t **self_p)
     assert (self_p);
     if (*self_p) {
         curve_codec_t *self = *self_p;
-        curve_keypair_destroy (&self->permakey);
-        curve_keypair_destroy (&self->transkey);
+        zcert_destroy (&self->permacert);
+        zcert_destroy (&self->transcert);
         zhash_destroy (&self->metadata_sent);
         zhash_destroy (&self->metadata_recd);
         free (self->metadata_data);
@@ -459,12 +457,14 @@ s_authenticate_peer (curve_codec_t *self)
 
     //  Create a socket for the ZAP request; we'll destroy this as soon
     //  as the request is done, to avoid old sockets accumulating in the
-    //  parent context.
+    //  parent context. To check if there is a ZAP handler installed, we
+    //  try to bind to the ZAP endpoint and only continue if that failed.
     void *requestor = zsocket_new (self->ctx, ZMQ_REQ);
-    if (zsocket_connect (requestor, "inproc://zeromq.zap.01") == -1) {
+    if (zsocket_bind (requestor, "inproc://zeromq.zap.01") == 0) {
         zsocket_destroy (self->ctx, requestor);
         return 0;                       //  ZAP not installed
     }
+    zsocket_connect (requestor, "inproc://zeromq.zap.01");
     zmsg_t *request = zmsg_new ();
     zmsg_addstr (request, "1.0");       //  ZAP version 1.0
     zmsg_addstr (request, "");          //  Sequence number, unused
@@ -500,13 +500,13 @@ s_produce_hello (curve_codec_t *self)
     hello_t *hello = (hello_t *) zframe_data (command);
     memcpy (hello->id, "\x05HELLO", 6);
 
-    memcpy (hello->client, curve_keypair_public (self->transkey), 32);
+    memcpy (hello->client, zcert_public_key (self->transcert), 32);
     byte signature [64] = { 0 };
     s_encrypt (self, hello->nonce,
                signature, 64,
                "CurveZMQHELLO---",
                self->peer_permakey,     //  Server public key
-               curve_keypair_secret (self->transkey));
+               zcert_secret_key (self->transcert));
 
     return command;
 }
@@ -516,7 +516,6 @@ static int
 s_process_hello (curve_codec_t *self, zframe_t *input)
 {
     hello_t *hello = (hello_t *) zframe_data (input);
-
     memcpy (self->peer_transkey, hello->client, 32);
     byte signature_received [64];
     int rc = s_decrypt (self,
@@ -524,7 +523,7 @@ s_process_hello (curve_codec_t *self, zframe_t *input)
         signature_received, 64,
         "CurveZMQHELLO---",
         hello->client,
-        curve_keypair_secret (self->permakey));
+        zcert_secret_key (self->permacert));
 
     return rc;
 }
@@ -543,13 +542,13 @@ s_produce_welcome (curve_codec_t *self)
     //  Generate client transient key as late as possible. We have not
     //  yet authenticated the client, so it may be hostile, but at least
     //  it knows the server's public key.
-    self->transkey = curve_keypair_new ();
+    self->transcert = zcert_new ();
 
     //  Generate cookie = Box [C' + s'](t),
     memset (plain, 0, crypto_box_ZEROBYTES);
     memcpy (plain + crypto_box_ZEROBYTES, self->peer_transkey, 32);
     memcpy (plain + crypto_box_ZEROBYTES + 32,
-            curve_keypair_secret (self->transkey), 32);
+            zcert_secret_key (self->transcert), 32);
 
     //  Create full nonce for encryption
     //  8-byte prefix plus 16-byte random nonce
@@ -566,14 +565,14 @@ s_produce_welcome (curve_codec_t *self)
     assert (rc == 0);
 
     //  Create Box [S' + cookie](S->C')
-    memcpy (plain, curve_keypair_public (self->transkey), 32);
+    memcpy (plain, zcert_public_key (self->transcert), 32);
     memcpy (plain + 32, cookie_nonce, 16);
     memcpy (plain + 48, cookie_box + crypto_box_BOXZEROBYTES, 80);
     s_encrypt (self, welcome->nonce,
                plain, 128,
                "WELCOME-",
                self->peer_transkey,
-               curve_keypair_secret (self->permakey));
+               zcert_secret_key (self->permacert));
 
     return command;
 }
@@ -590,7 +589,7 @@ s_process_welcome (curve_codec_t *self, zframe_t *input)
         plain, 128,
         "WELCOME-",
         self->peer_permakey,    //  Server public key
-        curve_keypair_secret (self->transkey));
+        zcert_secret_key (self->transcert));
 
     if (rc == 0) {
         memcpy (self->peer_transkey, plain, 32);
@@ -606,7 +605,7 @@ s_precompute_key (curve_codec_t *self)
 {
     int rc = crypto_box_beforenm (self->precomputed,
                                   self->peer_transkey,
-                                  curve_keypair_secret (self->transkey));
+                                  zcert_secret_key (self->transcert));
     assert (rc == 0);
 }
 
@@ -620,25 +619,27 @@ s_produce_initiate (curve_codec_t *self)
     memcpy (initiate->id, "\x08INITIATE", 9);
     memcpy (initiate->cookie, self->cookie, sizeof (initiate->cookie));
 
-    //  Create vouch = Box [C'](C->S)
-    byte vouch [64];
-    s_encrypt (self, vouch,
-               curve_keypair_public (self->transkey), 32,
+    //  Create vouch = Box [C',S](C->S')
+    byte vouch_plain [64];           //  Space for plain text vouch
+    byte vouch_crypt [96];
+    memcpy (vouch_plain, zcert_public_key (self->transcert), 32);
+    memcpy (vouch_plain + 32, self->peer_permakey, 32);
+    s_encrypt (self, vouch_crypt,
+               vouch_plain, 64,
                "VOUCH---",
-               self->peer_permakey,     //  Server public key
-               curve_keypair_secret (self->permakey));
+               NULL, NULL);
 
     //  Working variables for crypto calls
-    size_t box_size = 96 + self->metadata_size;
+    size_t box_size = 128 + self->metadata_size;
     byte *plain = malloc (box_size);
     byte *box = malloc (box_size);
 
     //  Create Box [C + vouch + metadata](C'->S')
-    memcpy (plain, curve_keypair_public (self->permakey), 32);
-    memcpy (plain + 32, vouch, 64);
-    memcpy (plain + 96, self->metadata_data, self->metadata_size);
+    memcpy (plain, zcert_public_key (self->permacert), 32);
+    memcpy (plain + 32, vouch_crypt, 96);
+    memcpy (plain + 128, self->metadata_data, self->metadata_size);
     s_encrypt (self, initiate->nonce,
-               plain, 96 + self->metadata_size,
+               plain, 128 + self->metadata_size,
                "CurveZMQINITIATE",
                NULL, NULL);
     free (plain);
@@ -656,7 +657,7 @@ s_process_initiate (curve_codec_t *self, zframe_t *input)
 
     initiate_t *initiate = (initiate_t *) zframe_data (input);
     size_t metadata_size = zframe_size (input) - sizeof (initiate_t);
-    size_t box_size = crypto_box_ZEROBYTES + 96 + metadata_size;
+    size_t box_size = crypto_box_ZEROBYTES + 128 + metadata_size;
     byte *plain = malloc (box_size);
     byte *box = malloc (box_size);
 
@@ -678,14 +679,14 @@ s_process_initiate (curve_codec_t *self, zframe_t *input)
         //  Check cookie plain text is as expected [C' + s']
         byte *cookie = plain + crypto_box_ZEROBYTES;
         if (memcmp (cookie, self->peer_transkey, 32)
-        ||  memcmp (cookie + 32, curve_keypair_secret (self->transkey), 32))
+        ||  memcmp (cookie + 32, zcert_secret_key (self->transcert), 32))
             rc = -1;
     }
     if (rc == 0)
         //  Open Box [C + vouch + metadata](C'->S')
         rc = s_decrypt (self,
             initiate->nonce,
-            plain, 96 + metadata_size,
+            plain, 128 + metadata_size,
             "CurveZMQINITIATE",
             NULL, NULL);
 
@@ -695,20 +696,21 @@ s_process_initiate (curve_codec_t *self, zframe_t *input)
             rc = -1;            //  Authentication failed
     }
     if (rc == 0) {
-        s_decode_metadata (self, plain + 96, metadata_size);
+        s_decode_metadata (self, plain + 128, metadata_size);
 
-        //  Vouch nonce + box is 64 bytes at plain + 32
-        byte vouch [64];
-        memcpy (vouch, plain + 32, 64);
+        //  Vouch nonce + box is 96 bytes at (plain + 32)
+        byte vouch [96];
+        memcpy (vouch, plain + 32, 96);
         int rc = s_decrypt (self,
             vouch,
-            plain, 32,
+            plain, 64,
             "VOUCH---",
-            self->peer_permakey,    //  Client permanent key
-            curve_keypair_secret (self->permakey));
+            NULL, NULL);
 
-        //  Check vouch is short term client public key
-        if (rc == 0 && memcmp (plain, self->peer_transkey, 32))
+        //  Check vouch is short term client public key plus our public key
+        if (rc == 0 
+        && (memcmp (plain, self->peer_transkey, 32)
+        ||  memcmp (plain + 32, zcert_public_key (self->permacert), 32)))
             rc = -1;
     }
     free (plain);
@@ -805,7 +807,7 @@ s_command (curve_codec_t *self, zframe_t *input)
         if (size == sizeof (hello_t) && memcmp (data, "\x05HELLO", 6) == 0) {
             if (self->verbose)
                 puts ("Received C:HELLO");
-            return hello_command;
+           return hello_command;
         }
         else
         if (size >= sizeof (initiate_t) && memcmp (data, "\x08INITIATE", 9) == 0) {
@@ -993,7 +995,7 @@ curve_codec_metadata (curve_codec_t *self)
 //  Selftest
 
 //  @selftest
-//  For the test case, we'll put the client and server keypairs into the
+//  For the test case, we'll put the client and server certs into the
 //  the same keystore file. This is now how it would work in real life.
 //
 //  The test case consists of the client sending a series of messages to
@@ -1001,75 +1003,27 @@ curve_codec_metadata (curve_codec_t *self)
 //  both single and multipart messages. A message "END" signals the end
 //  of the test.
 
-//  This is our ZAP authenticator; for now it approves all clients
-
-void zap_authenticator (void *args, zctx_t *ctx, void *pipe)
-{
-    void *handler = zsocket_new (ctx, ZMQ_REP);
-    int rc = zsocket_bind (handler, "inproc://zeromq.zap.01");
-    assert (rc != -1);
-
-    while (true) {
-        zmsg_t *request = zmsg_recv (handler);
-        if (!request)
-            break;              //  Interrupted, so exit thread
-
-        //  Check version number
-        char *version = zmsg_popstr (request);
-        assert (streq (version, "1.0"));
-        free (version);
-
-        //  Get sequence number for use in reply
-        char *sequence = zmsg_popstr (request);
-
-        //  Discard domain, address, and identity
-        free (zmsg_popstr (request));
-        free (zmsg_popstr (request));
-        free (zmsg_popstr (request));
-
-        //  Get and validate mechanism
-        char *mechanism = zmsg_popstr (request);
-        assert (streq (mechanism, "CURVE"));
-        free (mechanism);
-
-        //  Rest of request contains client public key
-        assert (zmsg_size (request) == 1);
-        zmsg_destroy (&request);
-
-        zmsg_t *reply = zmsg_new ();
-        zmsg_addstr (reply, "1.0");       //  ZAP version 1.0
-        zmsg_addstr (reply, sequence);    //  Sequence number
-        zmsg_addstr (reply, "200");
-        zmsg_addstr (reply, "OK");
-        zmsg_addstr (reply, "");
-        zmsg_send (&reply, handler);
-        free (sequence);
-    }
-}
+#define TESTDIR ".test_curve_codec"
 
 static void *
 server_task (void *args)
 {
     bool verbose = *((bool *) args);
-
+    //  Install the authenticator
     zctx_t *ctx = zctx_new ();
-    assert (ctx);
+    zauth_t *auth = zauth_new (ctx);
+    assert (auth);
+    zauth_set_verbose (auth, verbose);
+    zauth_configure_curve (auth, "*", TESTDIR);
+
     void *router = zsocket_new (ctx, ZMQ_ROUTER);
     int rc = zsocket_bind (router, "tcp://*:9000");
     assert (rc != -1);
 
-    //  Fork a child thread to do ZAP authentication
-    zthread_fork (ctx, zap_authenticator, NULL);
-
-    //  Create a new server instance
-    curve_keystore_t *keystore = curve_keystore_new ();
-    rc = curve_keystore_load (keystore, "test_keystore");
-    assert (rc == 0);
-    curve_keypair_t *keypair = curve_keystore_get (keystore, "server");
-    assert (keypair);
-    curve_codec_t *server = curve_codec_new_server (keypair, ctx);
+    zcert_t *cert = zcert_load (TESTDIR "/server.cert");
+    assert (cert);
+    curve_codec_t *server = curve_codec_new_server (cert, ctx);
     assert (server);
-    curve_keypair_destroy (&keypair);
     curve_codec_set_verbose (server, verbose);
 
     //  Set some metadata properties
@@ -1107,8 +1061,9 @@ server_task (void *args)
         zframe_send (&sender, router, ZFRAME_MORE);
         zframe_send (&encrypted, router, 0);
     }
-    curve_keystore_destroy (&keystore);
     curve_codec_destroy (&server);
+    zcert_destroy (&cert);
+    zauth_destroy (&auth);
     zctx_destroy (&ctx);
     return NULL;
 }
@@ -1122,31 +1077,36 @@ curve_codec_test (bool verbose)
     //  Check compiler isn't padding our structures mysteriously
     assert (sizeof (hello_t) == 200);
     assert (sizeof (welcome_t) == 168);
-    assert (sizeof (initiate_t) == 225);
+    assert (sizeof (initiate_t) == 257);
     assert (sizeof (ready_t) == 30);
     assert (sizeof (message_t) == 32);
+
+    //  @selftest
+    //  Create temporary directory for test files
+    zsys_dir_create (TESTDIR);
+    
+    zctx_t *ctx = zctx_new ();
+    assert (ctx);
+    void *dealer = zsocket_new (ctx, ZMQ_DEALER);
+    int rc = zsocket_connect (dealer, "tcp://127.0.0.1:9000");
+    assert (rc != -1);
+
+    //  We'll create two new certificates and save the client public 
+    //  certificate on disk; in a real case we'd transfer this securely
+    //  from the client machine to the server machine.
+    zcert_t *server_cert = zcert_new ();
+    zcert_save (server_cert, TESTDIR "/server.cert");
+
+    zcert_t *client_cert = zcert_new ();
+    zcert_save_public (client_cert, TESTDIR "/client.cert");
 
     //  We'll run the server as a background task, and the
     //  client in this foreground thread.
     zthread_new (server_task, &verbose);
 
-    //  @selftest
-    curve_keystore_t *keystore = curve_keystore_new ();
-    int rc = curve_keystore_load (keystore, "test_keystore");
-    assert (rc == 0);
-
-    zctx_t *ctx = zctx_new ();
-    assert (ctx);
-    void *dealer = zsocket_new (ctx, ZMQ_DEALER);
-    rc = zsocket_connect (dealer, "tcp://127.0.0.1:9000");
-    assert (rc != -1);
-
     //  Create a new client instance
-    curve_keypair_t *keypair = curve_keystore_get (keystore, "client");
-    assert (keypair);
-    curve_codec_t *client = curve_codec_new_client (keypair);
+    curve_codec_t *client = curve_codec_new_client (client_cert);
     assert (client);
-    curve_keypair_destroy (&keypair);
     curve_codec_set_verbose (client, verbose);
 
     //  Set some metadata properties
@@ -1155,10 +1115,8 @@ curve_codec_test (bool verbose)
 
     //  Kick off client handshake
     //  First frame to new client is server's public key
-    curve_keypair_t *server_keypair = curve_keystore_get (keystore, "server");
-    zframe_t *input = zframe_new (curve_keypair_public (server_keypair), 32);
+    zframe_t *input = zframe_new (zcert_public_key (server_cert), 32);
     zframe_t *output = curve_codec_execute (client, &input);
-    curve_keypair_destroy (&server_keypair);
 
     while (!curve_codec_connected (client)) {
         assert (output);
@@ -1248,19 +1206,25 @@ curve_codec_test (bool verbose)
     assert (cleartext);
     zframe_destroy (&cleartext);
 
-    curve_keystore_destroy (&keystore);
+    zcert_destroy (&server_cert);
+    zcert_destroy (&client_cert);
     curve_codec_destroy (&client);
 
     //  Some invalid operations to test exception handling
-    keypair = curve_keypair_new ();
-    input = zframe_new (curve_keypair_public (keypair), 32);
-    curve_codec_t *server = curve_codec_new_server (keypair, ctx);
-    curve_keypair_destroy (&keypair);
+    server_cert = zcert_new ();
+    input = zframe_new (zcert_public_key (server_cert), 32);
+    curve_codec_t *server = curve_codec_new_server (server_cert, ctx);
     curve_codec_execute (server, &input);
     assert (curve_codec_exception (server));
     curve_codec_destroy (&server);
+    zcert_destroy (&server_cert);
 
     zctx_destroy (&ctx);
+    
+    //  Delete all test files
+    zdir_t *dir = zdir_new (TESTDIR, NULL);
+    zdir_remove (dir, true);
+    zdir_destroy (&dir);
     //  @end
 
     //  Ensure server thread has exited before we do
