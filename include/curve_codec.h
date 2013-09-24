@@ -34,24 +34,24 @@ typedef struct _curve_codec_t curve_codec_t;
 
 //  @interface
 //  Create a new curve_codec client instance. Caller provides the
-//  permanent keypair for the client.
+//  permanent cert for the client.
 CZMQ_EXPORT curve_codec_t *
-    curve_codec_new_client (curve_keypair_t *keypair);
+    curve_codec_new_client (zcert_t *cert);
 
 //  Create a new curve_codec server instance. Caller provides the
-//  permanent keypair for the server, and optionally a context used
+//  permanent cert for the server, and optionally a context used
 //  for inproc authentication of client keys over ZAP (0MQ RFC 27).
 CZMQ_EXPORT curve_codec_t *
-    curve_codec_new_server (curve_keypair_t *keypair, zctx_t *ctx);
+    curve_codec_new_server (zcert_t *cert, zctx_t *ctx);
 
 //  Destructor
 CZMQ_EXPORT void
     curve_codec_destroy (curve_codec_t **self_p);
 
-//  Set permanent keypair for this codec; takes ownership of keypair and
+//  Set permanent cert for this codec; takes ownership of cert and
 //  destroys when destroying the codec.
 CZMQ_EXPORT void
-    curve_codec_set_permakey (curve_codec_t *self, curve_keypair_t *keypair);
+    curve_codec_set_permakey (curve_codec_t *self, zcert_t *cert);
 
 //  Set a metadata property; these are sent to the peer after the
 //  security handshake. Property values are strings.
