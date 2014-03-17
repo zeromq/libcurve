@@ -559,7 +559,7 @@ curve_client_test (bool verbose)
         for (byte_nbr = 0; byte_nbr < size; byte_nbr++)
             zframe_data (data)[byte_nbr] = (byte) byte_nbr;
         msg = zmsg_new ();
-        zmsg_push (msg, data);
+        zmsg_prepend (msg, &data);
         curve_client_send (client, &msg);
 
         msg = curve_client_recv (client);
