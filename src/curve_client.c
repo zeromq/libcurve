@@ -65,7 +65,7 @@ curve_client_new (zcert_t **cert_p)
     assert (self->data);
     int rc = zsocket_bind (self->data, "inproc://data-%p", self->data);
     assert (rc != -1);
-    zstr_sendm (self->control, "inproc://data-%p", self->data);
+    zstr_sendfm (self->control, "inproc://data-%p", self->data);
    
     //  Now send cert on control socket as well
     rc = zmq_send (self->control, zcert_public_key (*cert_p), 32, ZMQ_SNDMORE);
@@ -123,7 +123,7 @@ curve_client_set_verbose (curve_client_t *self, bool verbose)
 {
     assert (self);
     zstr_sendm (self->control, "VERBOSE");
-    zstr_send  (self->control, "%d", verbose);
+    zstr_sendf (self->control, "%d", verbose);
 }
 
 
@@ -250,7 +250,7 @@ s_agent_new (zctx_t *ctx, void *control)
     //  Connect our data socket to caller's endpoint
     self->data = zsocket_new (ctx, ZMQ_PAIR);
     char *endpoint = zstr_recv (self->control);
-    int rc = zsocket_connect (self->data, endpoint);
+    int rc = zsocket_connect (self->data, "%s", endpoint);
     assert (rc != -1);
     free (endpoint);
 
@@ -305,7 +305,7 @@ s_agent_handle_control (agent_t *self)
     if (streq (command, "CONNECT")) {
         assert (!self->endpoint);
         self->endpoint = zmsg_popstr (request);
-        int rc = zsocket_connect (self->dealer, self->endpoint);
+        int rc = zsocket_connect (self->dealer, "%s", self->endpoint);
         assert (rc != -1);
         zframe_t *server_key = zmsg_pop (request);
         zframe_t *output = curve_codec_execute (self->codec, &server_key);
@@ -315,7 +315,7 @@ s_agent_handle_control (agent_t *self)
     else
     if (streq (command, "DISCONNECT")) {
         if (self->endpoint) {
-            int rc = zsocket_disconnect (self->dealer, self->endpoint);
+            int rc = zsocket_disconnect (self->dealer, "%s", self->endpoint);
             assert (rc != -1);
             free (self->endpoint);
         }
@@ -453,7 +453,7 @@ server_task (void *args)
     zauth_configure_curve (auth, "*", TESTDIR);
 
     void *router = zsocket_new (ctx, ZMQ_ROUTER);
-    int rc = zsocket_bind (router, "tcp://*:9000");
+    int rc = zsocket_bind (router, "tcp://127.0.0.1:9004");
     assert (rc != -1);
 
     zcert_t *server_cert = zcert_load (TESTDIR "/server.cert");
@@ -530,7 +530,7 @@ curve_client_test (bool verbose)
     curve_client_set_metadata (client, "Client", "CURVEZMQ/curve_client");
     curve_client_set_metadata (client, "Identity", "E475DA11");
     curve_client_set_verbose (client, verbose);
-    curve_client_connect (client, "tcp://127.0.0.1:9000", zcert_public_key (server_cert));
+    curve_client_connect (client, "tcp://127.0.0.1:9004", zcert_public_key (server_cert));
 
     curve_client_sendstr (client, "Hello, World");
     char *reply = curve_client_recvstr (client);

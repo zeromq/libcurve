@@ -64,7 +64,7 @@ curve_server_new (zctx_t *ctx, zcert_t **cert_p)
     assert (self->data);
     int rc = zsocket_bind (self->data, "inproc://data-%p", self->data);
     assert (rc != -1);
-    zstr_sendm (self->control, "inproc://data-%p", self->data);
+    zstr_sendfm (self->control, "inproc://data-%p", self->data);
     
     //  Now send cert on control socket as well
     rc = zmq_send (self->control, zcert_public_key (*cert_p), 32, ZMQ_SNDMORE);
@@ -120,7 +120,7 @@ curve_server_set_verbose (curve_server_t *self, bool verbose)
 {
     assert (self);
     zstr_sendm (self->control, "VERBOSE");
-    zstr_send  (self->control, "%d", verbose);
+    zstr_sendf (self->control, "%d", verbose);
 }
 
 
@@ -132,7 +132,7 @@ curve_server_set_max_clients (curve_server_t *self, int limit)
 {
     assert (self);
     zstr_sendm (self->control, "MAX CLIENTS");
-    zstr_send  (self->control, "%d", limit);
+    zstr_sendf (self->control, "%d", limit);
 }
 
 
@@ -144,7 +144,7 @@ curve_server_set_max_pending (curve_server_t *self, int limit)
 {
     assert (self);
     zstr_sendm (self->control, "MAX PENDING");
-    zstr_send  (self->control, "%d", limit);
+    zstr_sendf (self->control, "%d", limit);
 }
 
 
@@ -156,7 +156,7 @@ curve_server_set_client_ttl (curve_server_t *self, int limit)
 {
     assert (self);
     zstr_sendm (self->control, "CLIENT TTL");
-    zstr_send  (self->control, "%d", limit);
+    zstr_sendf (self->control, "%d", limit);
 }
 
 
@@ -168,7 +168,7 @@ curve_server_set_pending_ttl (curve_server_t *self, int limit)
 {
     assert (self);
     zstr_sendm (self->control, "PENDING TTL");
-    zstr_send  (self->control, "%d", limit);
+    zstr_sendf (self->control, "%d", limit);
 }
 
 
@@ -267,7 +267,7 @@ s_agent_new (zctx_t *ctx, void *control)
     //  Connect our data socket to caller's endpoint
     self->data = zsocket_new (ctx, ZMQ_PAIR);
     char *endpoint = zstr_recv (self->control);
-    int rc = zsocket_connect (self->data, endpoint);
+    int rc = zsocket_connect (self->data, "%s", endpoint);
     assert (rc != -1);
     free (endpoint);
 
@@ -444,14 +444,15 @@ s_agent_handle_control (agent_t *self)
     else
     if (streq (command, "BIND")) {
         char *endpoint = zmsg_popstr (request);
-        int rc = zsocket_bind (self->router, endpoint);
+puts (endpoint);
+        int rc = zsocket_bind (self->router, "%s", endpoint);
         assert (rc != -1);
         free (endpoint);
     }
     else
     if (streq (command, "UNBIND")) {
         char *endpoint = zmsg_popstr (request);
-        int rc = zsocket_unbind (self->router, endpoint);
+        int rc = zsocket_unbind (self->router, "%s", endpoint);
         assert (rc != -1);
         free (endpoint);
     }
@@ -609,14 +610,16 @@ client_task (void *args)
 {
     bool verbose = *((bool *) args);
     
+    char filename [256];
+    printf (filename, TESTDIR "/client-%07d.cert", randof (10000000));
     zcert_t *client_cert = zcert_new ();
-    zcert_save_public (client_cert, TESTDIR "/client-%07d.cert", randof (10000000));
+    zcert_save_public (client_cert, filename);
     curve_client_t *client = curve_client_new (&client_cert);
     curve_client_set_verbose (client, verbose);
 
     zcert_t *server_cert = zcert_load (TESTDIR "/server.cert");
     assert (server_cert);
-    curve_client_connect (client, "tcp://127.0.0.1:9000", zcert_public_key (server_cert));
+    curve_client_connect (client, "tcp://127.0.0.1:9004", zcert_public_key (server_cert));
     zcert_destroy (&server_cert);
 
     curve_client_sendstr (client, "Hello, World");
@@ -695,7 +698,7 @@ curve_server_test (bool verbose)
 
     curve_server_t *server = curve_server_new (ctx, &server_cert);
     curve_server_set_verbose (server, verbose);
-    curve_server_bind (server, "tcp://*:9000");
+    curve_server_bind (server, "tcp://127.0.0.1:9004");
     
     while (live_clients > 0) {
         zmsg_t *msg = curve_server_recv (server);
@@ -709,7 +712,7 @@ curve_server_test (bool verbose)
     zcert_t *unknown = zcert_new ();
     curve_client_t *client = curve_client_new (&unknown);
     curve_client_set_verbose (client, true);
-    curve_client_connect (client, "tcp://127.0.0.1:9000", bad_server_key);
+    curve_client_connect (client, "tcp://127.0.0.1:9004", bad_server_key);
     curve_client_sendstr (client, "Hello, World");
 
     //  Expect no reply after 250msec
