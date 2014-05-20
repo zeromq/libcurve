@@ -10,9 +10,9 @@ SYNOPSIS
 ----
 //  Create a new curve_client instance.
 //  We use a context per instance to keep the API as simple as possible.
-//  Takes ownership of keypair.
+//  Takes ownership of cert.
 CZMQ_EXPORT curve_client_t *
-    curve_client_new (curve_keypair_t **keypair_p);
+    curve_client_new (zcert_t **cert_p);
 
 //  Destructor
 CZMQ_EXPORT void
@@ -75,19 +75,27 @@ EXAMPLE
 -------
 .From curve_client_test method
 ----
-    curve_keystore_t *keystore = curve_keystore_new ();
-    int rc = curve_keystore_load (keystore, "test_keystore");
-    assert (rc == 0);
+    //  Create temporary directory for test files
+    zsys_dir_create (TESTDIR);
+    
+    //  We'll create two new certificates and save the client public 
+    //  certificate on disk; in a real case we'd transfer this securely
+    //  from the client machine to the server machine.
+    zcert_t *server_cert = zcert_new ();
+    zcert_save (server_cert, TESTDIR "/server.cert");
 
-    curve_keypair_t *client_keypair = curve_keystore_get (keystore, "client");
-    curve_client_t *client = curve_client_new (&client_keypair);
+    //  We'll run the server as a background task, and the
+    //  client in this foreground thread.
+    zthread_new (server_task, &verbose);
+
+    zcert_t *client_cert = zcert_new ();
+    zcert_save_public (client_cert, TESTDIR "/client.cert");
+
+    curve_client_t *client = curve_client_new (&client_cert);
     curve_client_set_metadata (client, "Client", "CURVEZMQ/curve_client");
     curve_client_set_metadata (client, "Identity", "E475DA11");
     curve_client_set_verbose (client, verbose);
-
-    curve_keypair_t *server_keypair = curve_keystore_get (keystore, "server");
-    curve_client_connect (client, "tcp://127.0.0.1:9000", curve_keypair_public (server_keypair));
-    curve_keypair_destroy (&server_keypair);
+    curve_client_connect (client, "tcp://127.0.0.1:9000", zcert_public_key (server_cert));
 
     curve_client_sendstr (client, "Hello, World");
     char *reply = curve_client_recvstr (client);
@@ -96,8 +104,8 @@ EXAMPLE
 
     //  Try a multipart message
     zmsg_t *msg = zmsg_new ();
-    zmsg_pushstr (msg, "Hello, World");
-    zmsg_pushstr (msg, "Second frame");
+    zmsg_addstr (msg, "Hello, World");
+    zmsg_addstr (msg, "Second frame");
     curve_client_send (client, &msg);
     msg = curve_client_recv (client);
     assert (zmsg_size (msg) == 2);
@@ -116,7 +124,7 @@ EXAMPLE
         for (byte_nbr = 0; byte_nbr < size; byte_nbr++)
             zframe_data (data)[byte_nbr] = (byte) byte_nbr;
         msg = zmsg_new ();
-        zmsg_push (msg, data);
+        zmsg_prepend (msg, &data);
         curve_client_send (client, &msg);
 
         msg = curve_client_recv (client);
@@ -135,8 +143,14 @@ EXAMPLE
     reply = curve_client_recvstr (client);
     free (reply);
 
-    curve_keystore_destroy (&keystore);
+    zcert_destroy (&server_cert);
+    zcert_destroy (&client_cert);
     curve_client_destroy (&client);
+    
+    //  Delete all test files
+    zdir_t *dir = zdir_new (TESTDIR, NULL);
+    zdir_remove (dir, true);
+    zdir_destroy (&dir);
 ----
 
 SEE ALSO

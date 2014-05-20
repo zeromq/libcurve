@@ -8,9 +8,11 @@ curve_server - Secure server socket
 SYNOPSIS
 --------
 ----
-//  Create a new server instance, providing its permanent keypair
+//  Create a new server instance, providing its permanent cert
+//  The caller provides the ZeroMQ context so that it can also
+//  attach an authenticator (zauth) to the same context.
 CZMQ_EXPORT curve_server_t *
-    curve_server_new (curve_keypair_t **keypair_p);
+    curve_server_new (zctx_t *ctx, zcert_t **cert_p);
 
 //  Destructor
 CZMQ_EXPORT void
@@ -78,16 +80,31 @@ EXAMPLE
 -------
 .From curve_server_test method
 ----
-    curve_keystore_t *keystore = curve_keystore_new ();
-    int rc = curve_keystore_load (keystore, "test_keystore");
-    assert (rc == 0);
+    //  Create temporary directory for test files
+    srand (time (NULL));
+    zsys_dir_create (TESTDIR);
+    
+    zcert_t *server_cert = zcert_new ();
+    zcert_save (server_cert, TESTDIR "/server.cert");
 
-    curve_keypair_t *server_keypair = curve_keystore_get (keystore, "server");
-    curve_server_t *server = curve_server_new (&server_keypair);
-    curve_server_set_metadata (server, "Server", "CURVEZMQ/curve_server");
+    //  Install the authenticator
+    zctx_t *ctx = zctx_new ();
+    zauth_t *auth = zauth_new (ctx);
+    assert (auth);
+    zauth_set_verbose (auth, verbose);
+    zauth_configure_curve (auth, "*", TESTDIR);
+    
+    //  We'll run a set of clients as background tasks, and the
+    //  server in this foreground thread. Don't pass verbose to
+    //  the clients as the results are unreadable.
+    int live_clients;
+    for (live_clients = 0; live_clients < 5; live_clients++)
+        zthread_new (client_task, &verbose);
+
+    curve_server_t *server = curve_server_new (ctx, &server_cert);
     curve_server_set_verbose (server, verbose);
     curve_server_bind (server, "tcp://*:9000");
-
+    
     while (live_clients > 0) {
         zmsg_t *msg = curve_server_recv (server);
         if (memcmp (zframe_data (zmsg_last (msg)), "END", 3) == 0)
@@ -97,7 +114,7 @@ EXAMPLE
 
     //  Try an invalid client/server combination
     byte bad_server_key [32] = { 0 };
-    curve_keypair_t *unknown = curve_keypair_new ();
+    zcert_t *unknown = zcert_new ();
     curve_client_t *client = curve_client_new (&unknown);
     curve_client_set_verbose (client, true);
     curve_client_connect (client, "tcp://127.0.0.1:9000", bad_server_key);
@@ -109,9 +126,15 @@ EXAMPLE
     };
     assert (zmq_poll (pollitems, 1, 250) == 0);
     curve_client_destroy (&client);
-
-    curve_keystore_destroy (&keystore);
+ 
+    //  Delete all test files
+    zdir_t *dir = zdir_new (TESTDIR, NULL);
+    zdir_remove (dir, true);
+    zdir_destroy (&dir);
+    
     curve_server_destroy (&server);
+    zauth_destroy (&auth);
+    zctx_destroy (&ctx);
 ----
 
 SEE ALSO
