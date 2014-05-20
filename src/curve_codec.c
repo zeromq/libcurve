@@ -627,7 +627,8 @@ s_produce_initiate (curve_codec_t *self)
     s_encrypt (self, vouch_crypt,
                vouch_plain, 64,
                "VOUCH---",
-               NULL, NULL);
+               self->peer_transkey,
+               zcert_secret_key (self->permacert));
 
     //  Working variables for crypto calls
     size_t box_size = 128 + self->metadata_size;
@@ -701,11 +702,12 @@ s_process_initiate (curve_codec_t *self, zframe_t *input)
         //  Vouch nonce + box is 96 bytes at (plain + 32)
         byte vouch [96];
         memcpy (vouch, plain + 32, 96);
-        int rc = s_decrypt (self,
+        rc = s_decrypt (self,
             vouch,
             plain, 64,
             "VOUCH---",
-            NULL, NULL);
+            self->peer_permakey,
+            zcert_secret_key (self->transcert));
 
         //  Check vouch is short term client public key plus our public key
         if (rc == 0 
@@ -1098,7 +1100,10 @@ curve_codec_test (bool verbose)
     zcert_save (server_cert, TESTDIR "/server.cert");
 
     zcert_t *client_cert = zcert_new ();
-    zcert_save_public (client_cert, TESTDIR "/client.cert");
+    char *filename = (char *) malloc (strlen (TESTDIR) + 21);
+    sprintf (filename, TESTDIR "/client-%07d.cert", randof (10000000));
+    zcert_save_public (client_cert, filename);
+    free (filename);
 
     //  We'll run the server as a background task, and the
     //  client in this foreground thread.
