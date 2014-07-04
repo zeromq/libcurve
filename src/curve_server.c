@@ -611,7 +611,7 @@ client_task (void *args)
     bool verbose = *((bool *) args);
     
     char filename [256];
-    printf (filename, TESTDIR "/client-%07d.cert", randof (10000000));
+    snprintf (filename, 255, TESTDIR "/client-%07d.cert", randof (10000000));
     zcert_t *client_cert = zcert_new ();
     zcert_save_public (client_cert, filename);
     curve_client_t *client = curve_client_new (&client_cert);
