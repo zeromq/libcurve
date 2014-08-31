@@ -619,7 +619,7 @@ client_task (void *args)
 
     zcert_t *server_cert = zcert_load (TESTDIR "/server.cert");
     assert (server_cert);
-    curve_client_connect (client, "tcp://127.0.0.1:9004", zcert_public_key (server_cert));
+    curve_client_connect (client, "tcp://127.0.0.1:9006", zcert_public_key (server_cert));
     zcert_destroy (&server_cert);
 
     curve_client_sendstr (client, "Hello, World");
@@ -698,7 +698,7 @@ curve_server_test (bool verbose)
 
     curve_server_t *server = curve_server_new (ctx, &server_cert);
     curve_server_set_verbose (server, verbose);
-    curve_server_bind (server, "tcp://127.0.0.1:9004");
+    curve_server_bind (server, "tcp://127.0.0.1:9006");
     
     while (live_clients > 0) {
         zmsg_t *msg = curve_server_recv (server);
@@ -712,7 +712,7 @@ curve_server_test (bool verbose)
     zcert_t *unknown = zcert_new ();
     curve_client_t *client = curve_client_new (&unknown);
     curve_client_set_verbose (client, true);
-    curve_client_connect (client, "tcp://127.0.0.1:9004", bad_server_key);
+    curve_client_connect (client, "tcp://127.0.0.1:9006", bad_server_key);
     curve_client_sendstr (client, "Hello, World");
 
     //  Expect no reply after 250msec
