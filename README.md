@@ -20,7 +20,7 @@ NOTE: CurveCP, CurveZMQ and the Curve library are considered EXPERIMENTAL and NO
 <A name="toc2-21" title="Ownership and License" />
 ## Ownership and License
 
-Curve's contributors are listed in the AUTHORS file. It is held by the ZeroMQ organization at github.com. The authors of Curve grant you use of this software under the terms of the GNU Lesser General Public License (LGPL). For details see the files `COPYING` and `COPYING.LESSER` in this directory.
+Copyright (c) the Contributors as noted in the AUTHORS file. This file is part of the Curve authentication and encryption library. This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0. If a copy of the MPL was not distributed with this file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 <A name="toc2-26" title="Contributing" />
 ## Contributing
