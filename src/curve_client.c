@@ -467,7 +467,7 @@ server_task (void *args)
         zframe_send (&output, router, 0);
     }
     //  Check client metadata
-    char *client_name = zhash_lookup (curve_codec_metadata (server), "client");
+    char *client_name = (char *) zhash_lookup (curve_codec_metadata (server), "client");
     assert (client_name);
     assert (streq (client_name, "CURVEZMQ/curve_client"));
 

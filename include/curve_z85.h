@@ -18,9 +18,6 @@
 extern "C" {
 #endif
 
-//  Opaque class structure
-typedef struct _curve_z85_t curve_z85_t;
-
 //  @interface
 //  Encode a binary frame as a string; destination string MUST be at least
 //  size * 5 / 4 bytes long. Returns dest. Size must be a multiple of 4.
@@ -34,7 +31,7 @@ CZMQ_EXPORT uint8_t *
     curve_z85_decode (uint8_t *dest, char *string);
     
 //  Self test of this class
-void
+CZMQ_EXPORT void
     curve_z85_test (bool verbose);
 //  @end
 

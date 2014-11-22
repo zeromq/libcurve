@@ -462,7 +462,7 @@ s_agent_handle_router (agent_t *self)
 {
     zframe_t *address = zframe_recv (self->router);
     char *hashkey = zframe_strhex (address);
-    client_t *client = zhash_lookup (self->clients, hashkey);
+    client_t *client = (client_t *) zhash_lookup (self->clients, hashkey);
     if (client == NULL
     && self->nbr_pending < self->max_pending) {
         client = client_new (self, address);
@@ -533,7 +533,7 @@ s_agent_handle_data (agent_t *self)
     //  The assert disappears when we start to timeout clients...
     zmsg_t *request = zmsg_recv (self->data);
     char *hashkey = zmsg_popstr (request);
-    client_t *client = zhash_lookup (self->clients, hashkey);
+    client_t *client = (client_t *) zhash_lookup (self->clients, hashkey);
     free (hashkey);
     if (client) {
         //  Encrypt and send all frames of request

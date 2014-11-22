@@ -1,0 +1,143 @@
+#### curve_client - Secure client socket
+
+Implements a secure client socket, doing I/O in the background. This is
+a high-level class intended for applications. It wraps the curve_codec
+class, and runs it across a DEALER socket to connect to a curve_server
+socket at the other end.
+
+Please add @discuss section in ../src/curve_client.c.
+
+This is the class interface:
+
+    //  Create a new curve_client instance.
+    //  We use a context per instance to keep the API as simple as possible.
+    //  Takes ownership of cert.
+    CZMQ_EXPORT curve_client_t *
+        curve_client_new (zcert_t **cert_p);
+    
+    //  Destructor
+    CZMQ_EXPORT void
+        curve_client_destroy (curve_client_t **self_p);
+    
+    //  Set metadata property, to be sent to server on connect
+    CZMQ_EXPORT void
+        curve_client_set_metadata (curve_client_t *self, char *name, char *format, ...);
+    
+    //  Enable verbose tracing of commands and activity
+    CZMQ_EXPORT void
+        curve_client_set_verbose (curve_client_t *self, bool verbose);
+    
+    //  Create outgoing connection to server, providing server permanent
+    //  public key
+    CZMQ_EXPORT void
+        curve_client_connect (curve_client_t *self, char *endpoint, byte *server_key);
+    
+    //  Close outgoing connection to server; idempotent
+    CZMQ_EXPORT void
+        curve_client_disconnect (curve_client_t *self, char *endpoint);
+    
+    //  Send message to server, takes ownership of message
+    CZMQ_EXPORT int
+        curve_client_send (curve_client_t *self, zmsg_t **msg_p);
+    
+    //  Wait for message from server
+    CZMQ_EXPORT zmsg_t *
+        curve_client_recv (curve_client_t *self);
+    
+    //  Send single-frame string message to server
+    CZMQ_EXPORT int
+        curve_client_sendstr (curve_client_t *self, char *string);
+    
+    //  Wait for single-frame string message from server
+    CZMQ_EXPORT char *
+        curve_client_recvstr (curve_client_t *self);
+    
+    //  Get socket handle, for polling
+    //  NOTE: do not call send/recv directly on handle since internal message
+    //  format is NOT A CONTRACT and is liable to change arbitrarily.
+    CZMQ_EXPORT void *
+        curve_client_handle (curve_client_t *self);
+    
+    //  Self test of this class
+    void
+        curve_client_test (bool verbose);
+
+This is the class self test code:
+
+    //  Create temporary directory for test files
+    zsys_dir_create (TESTDIR);
+    
+    //  We'll create two new certificates and save the client public 
+    //  certificate on disk; in a real case we'd transfer this securely
+    //  from the client machine to the server machine.
+    zcert_t *server_cert = zcert_new ();
+    zcert_save (server_cert, TESTDIR "/server.cert");
+    
+    //  We'll run the server as a background task, and the
+    //  client in this foreground thread.
+    zthread_new (server_task, &verbose);
+    
+    zcert_t *client_cert = zcert_new ();
+    zcert_save_public (client_cert, TESTDIR "/client.cert");
+    
+    curve_client_t *client = curve_client_new (&client_cert);
+    curve_client_set_metadata (client, "Client", "CURVEZMQ/curve_client");
+    curve_client_set_metadata (client, "Identity", "E475DA11");
+    curve_client_set_verbose (client, verbose);
+    curve_client_connect (client, "tcp://127.0.0.1:9005", zcert_public_key (server_cert));
+    
+    curve_client_sendstr (client, "Hello, World");
+    char *reply = curve_client_recvstr (client);
+    assert (streq (reply, "Hello, World"));
+    free (reply);
+    
+    //  Try a multipart message
+    zmsg_t *msg = zmsg_new ();
+    zmsg_addstr (msg, "Hello, World");
+    zmsg_addstr (msg, "Second frame");
+    curve_client_send (client, &msg);
+    msg = curve_client_recv (client);
+    assert (zmsg_size (msg) == 2);
+    zmsg_destroy (&msg);
+    
+    //  Now send messages of increasing size, check they work
+    int count;
+    int size = 0;
+    for (count = 0; count < 18; count++) {
+        if (verbose)
+            printf ("Testing message of size=%d...\n", size);
+    
+        zframe_t *data = zframe_new (NULL, size);
+        int byte_nbr;
+        //  Set data to sequence 0...255 repeated
+        for (byte_nbr = 0; byte_nbr < size; byte_nbr++)
+            zframe_data (data)[byte_nbr] = (byte) byte_nbr;
+        msg = zmsg_new ();
+        zmsg_prepend (msg, &data);
+        curve_client_send (client, &msg);
+    
+        msg = curve_client_recv (client);
+        data = zmsg_pop (msg);
+        assert (data);
+        assert (zframe_size (data) == size);
+        for (byte_nbr = 0; byte_nbr < size; byte_nbr++) {
+            assert (zframe_data (data)[byte_nbr] == (byte) byte_nbr);
+        }
+        zframe_destroy (&data);
+        zmsg_destroy (&msg);
+        size = size * 2 + 1;
+    }
+    //  Signal end of test
+    curve_client_sendstr (client, "END");
+    reply = curve_client_recvstr (client);
+    free (reply);
+    
+    zcert_destroy (&server_cert);
+    zcert_destroy (&client_cert);
+    curve_client_destroy (&client);
+    
+    //  Delete all test files
+    zdir_t *dir = zdir_new (TESTDIR, NULL);
+    zdir_remove (dir, true);
+    zdir_destroy (&dir);
+

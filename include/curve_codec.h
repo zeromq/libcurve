@@ -18,9 +18,6 @@
 extern "C" {
 #endif
 
-//  Opaque class structure
-typedef struct _curve_codec_t curve_codec_t;
-
 //  @interface
 //  Create a new curve_codec client instance. Caller provides the
 //  permanent cert for the client.

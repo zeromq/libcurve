@@ -18,9 +18,6 @@
 extern "C" {
 #endif
 
-//  Opaque class structure
-typedef struct _curve_client_t curve_client_t;
-
 //  @interface
 //  Create a new curve_client instance.
 //  We use a context per instance to keep the API as simple as possible.

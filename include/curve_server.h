@@ -18,9 +18,6 @@
 extern "C" {
 #endif
 
-//  Opaque class structure
-typedef struct _curve_server_t curve_server_t;
-
 //  @interface
 //  Create a new server instance, providing its permanent cert
 //  The caller provides the ZeroMQ context so that it can also
