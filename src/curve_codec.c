@@ -2,23 +2,12 @@
     curve_codec - core CurveZMQ engine (rfc.zeromq.org/spec:26)
 
     -------------------------------------------------------------------------
-    Copyright (c) 1991-2013 iMatix Corporation <www.imatix.com>
-    Copyright other contributors as noted in the AUTHORS file.
-
+    Copyright (c) the Contributors as noted in the AUTHORS file.
     This file is part of the Curve authentication and encryption library.
 
-    This is free software; you can redistribute it and/or modify it under
-    the terms of the GNU Lesser General Public License as published by the
-    Free Software Foundation; either version 3 of the License, or (at your
-    option) any later version.
-
-    This software is distributed in the hope that it will be useful, but
-    WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABIL-
-    ITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Lesser General
-    Public License for more details.
-
-    You should have received a copy of the GNU Lesser General Public License
-    along with this program. If not, see <http://www.gnu.org/licenses/>.
+    This Source Code Form is subject to the terms of the Mozilla Public
+    License, v. 2.0. If a copy of the MPL was not distributed with this
+    file, You can obtain one at http://mozilla.org/MPL/2.0/.
     =========================================================================
 */
 
@@ -258,8 +247,8 @@ s_encrypt (
     //  zeros. box_size is combined size, the same in both cases, and
     //  encrypted data is thus 16 bytes longer than plain data.
     size_t box_size = crypto_box_ZEROBYTES + size;
-    byte *plain = malloc (box_size);
-    byte *box = malloc (box_size);
+    byte *plain = (byte *) malloc (box_size);
+    byte *box = (byte *) malloc (box_size);
 
     //  Prepare plain text with zero bytes at start for encryption
     memset (plain, 0, crypto_box_ZEROBYTES);
@@ -315,8 +304,8 @@ s_decrypt (
     byte *key_from)         //  Key to decrypt from, may be null
 {
     size_t box_size = crypto_box_ZEROBYTES + size;
-    byte *plain = malloc (box_size);
-    byte *box = malloc (box_size);
+    byte *plain = (byte *) malloc (box_size);
+    byte *box = (byte *) malloc (box_size);
 
     //  Prepare the full nonce from prefix and source
     //  Handle both short and long nonces
@@ -395,7 +384,7 @@ s_encode_metadata (curve_codec_t *self)
 {
     self->metadata_size = 0;
     zhash_foreach (self->metadata_sent, s_count_total_size, self);
-    self->metadata_data = zmalloc (self->metadata_size);
+    self->metadata_data = (byte *) malloc (self->metadata_size);
     self->metadata_curr = 0;
     zhash_foreach (self->metadata_sent, s_encode_property, self);
     assert (self->metadata_curr == self->metadata_size);
@@ -418,7 +407,7 @@ s_decode_metadata (curve_codec_t *self, byte *data, size_t size)
         if (needle + name_len > limit - 5)
             break;      //  Invalid property, skip the rest
 
-        char *name = malloc (name_len + 1);
+        char *name = (char *) malloc (name_len + 1);
         memcpy ((byte *) name, needle, name_len);
         name [name_len] = 0;
         needle += name_len;
@@ -434,7 +423,7 @@ s_decode_metadata (curve_codec_t *self, byte *data, size_t size)
                   + (needle [2] << 8)
                   +  needle [3];
         needle += 4;
-        char *value = malloc (value_len + 1);
+        char *value = (char *) malloc (value_len + 1);
         memcpy ((byte *) value, needle, value_len);
         value [value_len] = 0;
         needle += value_len;
@@ -632,8 +621,8 @@ s_produce_initiate (curve_codec_t *self)
 
     //  Working variables for crypto calls
     size_t box_size = 128 + self->metadata_size;
-    byte *plain = malloc (box_size);
-    byte *box = malloc (box_size);
+    byte *plain = (byte *) malloc (box_size);
+    byte *box = (byte *) malloc (box_size);
 
     //  Create Box [C + vouch + metadata](C'->S')
     memcpy (plain, zcert_public_key (self->permacert), 32);
@@ -659,8 +648,8 @@ s_process_initiate (curve_codec_t *self, zframe_t *input)
     initiate_t *initiate = (initiate_t *) zframe_data (input);
     size_t metadata_size = zframe_size (input) - sizeof (initiate_t);
     size_t box_size = crypto_box_ZEROBYTES + 128 + metadata_size;
-    byte *plain = malloc (box_size);
-    byte *box = malloc (box_size);
+    byte *plain = (byte *) malloc (box_size);
+    byte *box = (byte *) malloc (box_size);
 
     //  Check cookie is valid
     //  We could but don't expire cookie key after 60 seconds
@@ -742,7 +731,7 @@ s_process_ready (curve_codec_t *self, zframe_t *input)
 {
     ready_t *ready = (ready_t *) zframe_data (input);
     size_t size = zframe_size (input) - sizeof (ready_t);
-    byte *plain = zmalloc (size);
+    byte *plain = (byte *) malloc (size);
 
     int rc = s_decrypt (self,
         ready->nonce,
@@ -761,7 +750,7 @@ s_produce_message (curve_codec_t *self, zframe_t *clear)
 {
     //  Our clear text consists of flags + message data
     size_t clear_size = zframe_size (clear) + 1;
-    byte  *clear_data = malloc (clear_size);
+    byte *clear_data = (byte *) malloc (clear_size);
     clear_data [0] = zframe_more (clear);
     memcpy (clear_data + 1, zframe_data (clear), zframe_size (clear));
 
@@ -781,7 +770,7 @@ s_process_message (curve_codec_t *self, zframe_t *input)
 {
     message_t *message = (message_t *) zframe_data (input);
     size_t clear_size = zframe_size (input) - sizeof (message_t);
-    byte *clear_data = malloc (clear_size);
+    byte *clear_data = (byte *) malloc (clear_size);
     int rc = s_decrypt (self,
         message->nonce,
         clear_data, clear_size,
@@ -1043,7 +1032,7 @@ server_task (void *args)
         zframe_send (&output, router, 0);
     }
     //  Check client metadata
-    char *client_name = zhash_lookup (curve_codec_metadata (server), "client");
+    char *client_name = (char *) zhash_lookup (curve_codec_metadata (server), "client");
     assert (client_name);
     assert (streq (client_name, "CURVEZMQ/curve_codec"));
 
