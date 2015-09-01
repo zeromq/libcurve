@@ -15,14 +15,12 @@ CurveZMQ creates encrypted sessions ("connections") between two peers using shor
 
 The design of CurveZMQ stays as close as possible to the security handshake of [CurveCP](http://curvecp.org), a protocol designed to run over UDP.
 
-NOTE: CurveCP, CurveZMQ and the Curve library are considered EXPERIMENTAL and NOT PROVEN FOR PRODUCTION USE. Like all new security protocols, the code needs review and time to be considered mature. USE AT YOUR OWN RISK. The authors make NO PROMISES or guarantees about the level of security this protocol or code offers you.
-
-<A name="toc2-21" title="Ownership and License" />
+<A name="toc2-19" title="Ownership and License" />
 ## Ownership and License
 
 Copyright (c) the Contributors as noted in the AUTHORS file. This file is part of the Curve authentication and encryption library. This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0. If a copy of the MPL was not distributed with this file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-<A name="toc2-26" title="Contributing" />
+<A name="toc2-24" title="Contributing" />
 ## Contributing
 
 This project uses the [C4.1 (Collective Code Construction Contract)](http://rfc.zeromq.org/spec:22) process for contributions.
@@ -31,7 +29,7 @@ This project uses the [CLASS (C Language Style for Scalabilty)](http://rfc.zerom
 
 To report an issue, use the [Curve issue tracker](https://github.com/zeromq/libcurve/issues) at github.com.
 
-<A name="toc2-35" title="Dependencies" />
+<A name="toc2-33" title="Dependencies" />
 ## Dependencies
 
 This project needs these projects:
@@ -40,7 +38,7 @@ This project needs these projects:
 * libzmq - git://github.com/zeromq/libzmq.git
 * libczmq - git://github.com/zeromq/czmq.git
 
-<A name="toc2-44" title="Building and Installing" />
+<A name="toc2-42" title="Building and Installing" />
 ## Building and Installing
 
 This project uses autotools for packaging. To build from git you must first build libsodium, libzmq, and libczmq. The simplest way currently is to get these directly from GitHub. All example commands are for Linux:
@@ -85,14 +83,14 @@ You will need the libtool and autotools packages. On FreeBSD, you may need to sp
 
     ./configure --with-libzmq=/usr/local
 
-<A name="toc2-89" title="Linking with an Application" />
+<A name="toc2-87" title="Linking with an Application" />
 ## Linking with an Application
 
 Include `curve.h` in your application and link with libcurve. Here is a typical gcc link command:
 
     gcc -lcurve -lsodium -lzmq -lczmq myapp.c -o myapp
 
-<A name="toc2-96" title="Documentation" />
+<A name="toc2-94" title="Documentation" />
 ## Documentation
 
 All documentation is provided in the doc/ subdirectory.
