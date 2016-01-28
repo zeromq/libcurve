@@ -1,7 +1,6 @@
 /*  =========================================================================
-    curve_z85 - Z85 encoding and decoding, see 0MQ RFC 32
+    curve_z85 - Z85 encoding and decoding, see ZeroMQ RFC 32
 
-    -------------------------------------------------------------------------
     Copyright (c) the Contributors as noted in the AUTHORS file.
     This file is part of the Curve authentication and encryption library.
 

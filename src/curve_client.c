@@ -1,7 +1,6 @@
 /*  =========================================================================
     curve_client - Secure client socket
 
-    -------------------------------------------------------------------------
     Copyright (c) the Contributors as noted in the AUTHORS file.
     This file is part of the Curve authentication and encryption library.
 

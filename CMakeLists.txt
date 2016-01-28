@@ -11,22 +11,20 @@ project(curve)
 enable_language(C)
 enable_testing()
 
-set(SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR})
-set(BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR})
+set(SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 
 ########################################################################
-# determine version
+# options
 ########################################################################
-foreach(which MAJOR MINOR PATCH)
-    file(STRINGS "${SOURCE_DIR}/include/curve_library.h" CURVE_VERSION_STRING REGEX "#define CURVE_VERSION_${which}")
-    string(REGEX MATCH "#define CURVE_VERSION_${which} ([0-9_]+)" CURVE_REGEX_MATCH "${CURVE_VERSION_STRING}")
-    if (NOT CURVE_REGEX_MATCH)
-        message(FATAL_ERROR "failed to parse CURVE_VERSION_${which} from curve.h")
-    endif()
-    set(CURVE_${which}_VERSION ${CMAKE_MATCH_1})
-endforeach(which)
+if (EXISTS "${SOURCE_DIR}/.git")
+    OPTION (ENABLE_DRAFTS "Build and install draft classes and methods" ON)
+else ()
+    OPTION (ENABLE_DRAFTS "Build and install draft classes and methods" OFF)
+endif ()
 
-set(CURVE_VERSION ${CURVE_MAJOR_VERSION}.${CURVE_MINOR_VERSION}.${CURVE_PATCH_VERSION})
+IF (ENABLE_DRAFTS)
+    ADD_DEFINITIONS (-DCURVE_BUILD_DRAFT_API)
+ENDIF (ENABLE_DRAFTS)
 
 ########################################################################
 # platform.h
@@ -45,7 +43,7 @@ if (NOT HAVE_NET_IF_H)
     CHECK_INCLUDE_FILE("net/if.h" HAVE_NET_IF_H)
 endif()
 
-file(WRITE ${BINARY_DIR}/platform.h.in "
+file(WRITE "${SOURCE_DIR}/src/platform.h.in" "
 #cmakedefine HAVE_LINUX_WIRELESS_H
 #cmakedefine HAVE_NET_IF_H
 #cmakedefine HAVE_NET_IF_MEDIA_H
@@ -53,14 +51,17 @@ file(WRITE ${BINARY_DIR}/platform.h.in "
 #cmakedefine HAVE_FREEIFADDRS
 ")
 
-configure_file(${BINARY_DIR}/platform.h.in ${BINARY_DIR}/platform.h)
+configure_file("${SOURCE_DIR}/src/platform.h.in" "${SOURCE_DIR}/src/platform.h")
 
 #The MSVC C compiler is too out of date,
 #so the sources have to be compiled as c++
 if (MSVC)
     enable_language(CXX)
-    file(GLOB sources ${SOURCE_DIR}/src/*.c)
-    set_source_files_properties(${sources} PROPERTIES LANGUAGE CXX)
+    file(GLOB sources "${SOURCE_DIR}/src/*.c")
+    set_source_files_properties(
+        ${sources}
+        PROPERTIES LANGUAGE CXX
+    )
     set(MORE_LIBRARIES ws2_32 Rpcrt4 Iphlpapi)
 endif()
 
@@ -69,29 +70,46 @@ if (MINGW)
     set(MORE_LIBRARIES -lws2_32 -lrpcrt4 -liphlpapi)
 endif()
 
+# required libraries for cygwin
+if (CYGWIN)
+    set(MORE_LIBRARIES -luuid)
+endif()
 
-list(APPEND CMAKE_MODULE_PATH ${SOURCE_DIR})
+list(APPEND CMAKE_MODULE_PATH "${SOURCE_DIR}")
+set(OPTIONAL_LIBRARIES)
 
 ########################################################################
-# ZMQ dependency
+# LIBSODIUM dependency
 ########################################################################
-find_package(ZeroMQ REQUIRED)
-include_directories(${ZEROMQ_INCLUDE_DIRS})
-list(APPEND MORE_LIBRARIES ${ZEROMQ_LIBRARIES})
+find_package(libsodium)
+IF (LIBSODIUM_FOUND)
+    include_directories(${LIBSODIUM_INCLUDE_DIRS})
+    list(APPEND MORE_LIBRARIES ${LIBSODIUM_LIBRARIES})
+    add_definitions(-DHAVE_LIBSODIUM)
+    list(APPEND OPTIONAL_LIBRARIES ${LIBSODIUM_LIBRARIES})
+ENDIF (LIBSODIUM_FOUND)
+
+########################################################################
+# LIBZMQ dependency
+########################################################################
+find_package(libzmq REQUIRED)
+IF (LIBZMQ_FOUND)
+    include_directories(${LIBZMQ_INCLUDE_DIRS})
+    list(APPEND MORE_LIBRARIES ${LIBZMQ_LIBRARIES})
+ELSE (LIBZMQ_FOUND)
+    message( FATAL_ERROR "libzmq not found." )
+ENDIF (LIBZMQ_FOUND)
 
 ########################################################################
 # CZMQ dependency
 ########################################################################
-find_package(CZMQ REQUIRED)
-include_directories(${CZMQ_INCLUDE_DIRS})
-list(APPEND MORE_LIBRARIES ${CZMQ_LIBRARIES})
-
-########################################################################
-# SODIUM dependency
-########################################################################
-find_package(Sodium REQUIRED)
-include_directories(${SODIUM_INCLUDE_DIRS})
-list(APPEND MORE_LIBRARIES ${SODIUM_LIBRARIES})
+find_package(czmq REQUIRED)
+IF (CZMQ_FOUND)
+    include_directories(${CZMQ_INCLUDE_DIRS})
+    list(APPEND MORE_LIBRARIES ${CZMQ_LIBRARIES})
+ELSE (CZMQ_FOUND)
+    message( FATAL_ERROR "czmq not found." )
+ENDIF (CZMQ_FOUND)
 
 ########################################################################
 # includes
@@ -99,66 +117,134 @@ list(APPEND MORE_LIBRARIES ${SODIUM_LIBRARIES})
 set (curve_headers
     include/curve_library.h
     include/curve.h
-    include/curve_client.h
-    include/curve_server.h
-    include/curve_codec.h
-    include/curve_z85.h
 )
+
+IF (ENABLE_DRAFTS)
+    list(APPEND curve_headers
+        include/curve_client.h
+        include/curve_server.h
+        include/curve_codec.h
+        include/curve_z85.h
+    )
+ENDIF (ENABLE_DRAFTS)
+
 source_group ("Header Files" FILES ${curve_headers})
 install(FILES ${curve_headers} DESTINATION include)
 
 ########################################################################
 # library
 ########################################################################
-include_directories(${BINARY_DIR})
-include_directories(${SOURCE_DIR}/include)
+include_directories("${SOURCE_DIR}/src" "${SOURCE_DIR}/include")
 set (curve_sources
-    src/curve_client.c
-    src/curve_server.c
-    src/curve_codec.c
-    src/curve_z85.c
 )
-source_group ("Source Files" FILES ${curve_sources})
-add_library(curve SHARED ${curve_sources})
-set_target_properties(curve PROPERTIES DEFINE_SYMBOL "LIBCURVE_EXPORTS")
-target_link_libraries(curve ${ZEROMQ_LIBRARIES} ${MORE_LIBRARIES})
+
+IF (ENABLE_DRAFTS)
+    list (APPEND curve_sources
+        src/curve_client.c
+        src/curve_server.c
+        src/curve_codec.c
+        src/curve_z85.c
+    )
+ENDIF (ENABLE_DRAFTS)
+
+source_group("Source Files" FILES ${curve_sources})
+if (NOT DEFINED BUILD_SHARED_LIBS)
+    SET(BUILD_SHARED_LIBS ON)
+endif()
+add_library(curve ${curve_sources})
+set_target_properties(curve
+    PROPERTIES DEFINE_SYMBOL "LIBCURVE_EXPORTS"
+)
+set_target_properties(curve
+    PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${SOURCE_DIR}/src"
+)
+target_link_libraries(curve
+    ${ZEROMQ_LIBRARIES} ${MORE_LIBRARIES}
+)
 
 install(TARGETS curve
-    LIBRARY DESTINATION lib${LIB_SUFFIX} # .so file
-    ARCHIVE DESTINATION lib${LIB_SUFFIX} # .lib file
+    LIBRARY DESTINATION "lib${LIB_SUFFIX}" # .so file
+    ARCHIVE DESTINATION "lib${LIB_SUFFIX}" # .lib file
     RUNTIME DESTINATION bin              # .dll file
 )
 
 ########################################################################
 # pkgconfig
 ########################################################################
-set(VERSION "${CURVE_VERSION}")
-set(prefix "${CMAKE_INSTALL_PREFIX}")
-set(exec_prefix "\${prefix}")
-set(libdir "\${prefix}/lib${LIB_SUFFIX}")
-set(includedir "\${prefix}/include")
+set (VERSION "1.0.0")
+set (prefix "${CMAKE_INSTALL_PREFIX}")
+set (exec_prefix "\${prefix}")
+set (libdir "\${prefix}/lib${LIB_SUFFIX}")
+set (includedir "\${prefix}/include")
+IF (ENABLE_DRAFTS)
+    set (pkg_config_defines "-DCURVE_BUILD_DRAFT_API=1")
+ELSE (ENABLE_DRAFTS)
+    set (pkg_config_defines "")
+ENDIF (ENABLE_DRAFTS)
 configure_file(
-    ${SOURCE_DIR}/src/libcurve.pc.in
-    ${BINARY_DIR}/libcurve.pc
+    "${SOURCE_DIR}/src/libcurve.pc.in"
+    "${SOURCE_DIR}/src/libcurve.pc"
 @ONLY)
 
 install(
-    FILES ${BINARY_DIR}/libcurve.pc
-    DESTINATION lib${LIB_SUFFIX}/pkgconfig
+    FILES "${SOURCE_DIR}/src/libcurve.pc"
+    DESTINATION "lib${LIB_SUFFIX}/pkgconfig"
+)
+
+########################################################################
+# executables
+########################################################################
+add_executable(
+    curve_selftest
+    "${SOURCE_DIR}/src/curve_selftest.c"
+)
+target_link_libraries(
+    curve_selftest
+    curve
+    ${LIBZMQ_LIBRARIES}
+    ${CZMQ_LIBRARIES}
+    ${OPTIONAL_LIBRARIES}
+)
+set_target_properties(
+    curve_selftest
+    PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${SOURCE_DIR}/src"
 )
 
 ########################################################################
 # tests
 ########################################################################
-add_executable(curve_selftest ${SOURCE_DIR}/src/curve_selftest.c)
-target_link_libraries(curve_selftest curve ${ZEROMQ_LIBRARIES})
-add_test(curve_selftest curve_selftest)
+set(CLASSTEST_TIMEOUT 5 CACHE STRING "Timeout of the selftest of a class")
+set(TOTAL_TIMEOUT 20 CACHE STRING "Timout of the total testsuite")
+
+set(TEST_CLASSES
+)
+
+IF (ENABLE_DRAFTS)
+    list (APPEND TEST_CLASSES
+    curve_client
+    curve_server
+    curve_codec
+    curve_z85
+    )
+ENDIF (ENABLE_DRAFTS)
+
+foreach(TEST_CLASS ${TEST_CLASSES})
+    add_test(
+        NAME ${TEST_CLASS}
+        COMMAND curve_selftest --continue --verbose --test ${TEST_CLASS}
+    )
+    set_tests_properties(
+        ${TEST_CLASS}
+        PROPERTIES TIMEOUT ${CLASSTEST_TIMEOUT}
+    )
+endforeach(TEST_CLASS)
+
 
 ########################################################################
 # summary
 ########################################################################
-message(STATUS "version: ${CURVE_VERSION}")
-message(STATUS "install: ${CMAKE_INSTALL_PREFIX}")
+message (STATUS "*** Version number: ${VERSION}")
+message (STATUS "*** Install target: ${CMAKE_INSTALL_PREFIX}")
 
 ################################################################################
 #  THIS FILE IS 100% GENERATED BY ZPROJECT; DO NOT EDIT EXCEPT EXPERIMENTALLY  #

@@ -5,30 +5,33 @@
 
 ACLOCAL_AMFLAGS = -I config
 
+AM_CFLAGS = \
+    -Werror=format-security
+
+
 AM_CPPFLAGS = \
-    ${zmq_CFLAGS} \
+    ${libsodium_CFLAGS} \
+    ${libzmq_CFLAGS} \
     ${czmq_CFLAGS} \
-    ${sodium_CFLAGS} \
     -I$(srcdir)/include
 
-project_libs = \
-    ${zmq_LIBS} \
-    ${czmq_LIBS} \
-    ${sodium_LIBS}
+project_libs = ${libsodium_LIBS} ${libzmq_LIBS} ${czmq_LIBS}
 
-SUBDIRS =
-SUBDIRS += doc
-
-DIST_SUBDIRS =
-
+SUBDIRS = doc
+DIST_SUBDIRS = doc
 lib_LTLIBRARIES =
-
 bin_PROGRAMS =
-
+noinst_PROGRAMS =
 check_PROGRAMS =
+noinst_LTLIBRARIES =
+TESTS =
 
 EXTRA_DIST = \
-    version.sh
+    src/curve_classes.h \
+    LICENSE \
+    README.txt \
+    README.md \
+    CONTRIBUTING.md
 
 include $(srcdir)/src/Makemodule.am
 
