@@ -14,8 +14,11 @@
     =========================================================================
 */
 
-#ifndef __CURVE_CLASSES_H_INCLUDED__
-#define __CURVE_CLASSES_H_INCLUDED__
+#ifndef CURVE_CLASSES_H_INCLUDED
+#define CURVE_CLASSES_H_INCLUDED
+
+//  Platform definitions, must come first
+#include "platform.h"
 
 //  External API
 #include "../include/curve.h"

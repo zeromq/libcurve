@@ -7,11 +7,7 @@
 # Process this file with autoconf to produce a configure script.
 AC_PREREQ(2.61)
 #
-# The version number is extracted from include/curve.h using
-# the version.sh script. Hence, it should be updated there.
-# The version in git should reflect the *next* version planned.
-#
-AC_INIT([curve],[m4_esyscmd([./version.sh curve])],[zeromq-dev@lists.zeromq.org])
+AC_INIT([curve],[1.0.0],[zeromq-dev@lists.zeromq.org])
 
 AC_CONFIG_AUX_DIR(config)
 AC_CONFIG_MACRO_DIR(config)
@@ -67,27 +63,112 @@ if test "x${CURVE_GCOV}" == "xyes"; then
     if test "x${CURVE_ORIG_CFLAGS}" != "xnone"; then
         CFLAGS="${CFLAGS} ${CURVE_ORIG_CFLAGS}"
     fi
+    AM_CONDITIONAL(WITH_GCOV, true)
+else
+    AM_CONDITIONAL(WITH_GCOV, false)
 fi
 
 PREVIOUS_CFLAGS="${CFLAGS}"
 PREVIOUS_LIBS="${LIBS}"
 
 
-was_zmq_check_lib_detected=no
+was_libsodium_check_lib_detected=no
 
-PKG_CHECK_MODULES([zmq], [libzmq >= 2.2.0],,
-    [AC_MSG_ERROR([Cannot find required package for libzmq. Note, pkg-config is required due to specified version >= 2.2.0])
-  ])
+PKG_CHECK_MODULES([libsodium], [libsodium >= 0.0.0],
+    [
+        AC_DEFINE(HAVE_LIBSODIUM, 1, [The libsodium library is to be used.])
+    ],
+    [
+        AC_ARG_WITH([libsodium],
+            [
+                AS_HELP_STRING([--with-libsodium],
+                [Specify libsodium prefix])
+            ],
+            [search_libsodium="yes"],
+            [])
 
-if test "x$was_zmq_check_lib_detected" = "xno"; then
-    CFLAGS="${zmq_CFLAGS} ${CFLAGS}"
-    LIBS="${zmq_LIBS} ${LIBS}"
+        libsodium_synthetic_cflags=""
+        libsodium_synthetic_libs="-lsodium"
+
+        if test "x$search_libsodium" = "xyes"; then
+            if test -r "${with_libsodium}/include/sodium.h"; then
+                libsodium_synthetic_cflags="-I${with_libsodium}/include"
+                libsodium_synthetic_libs="-L${with_libsodium}/lib -lsodium"
+            else
+                AC_MSG_ERROR([${with_libsodium}/include/sodium.h not found. Please check libsodium prefix])
+            fi
+        fi
+
+        AC_CHECK_LIB([libsodium], [sodium_init],
+            [
+                CFLAGS="${libsodium_synthetic_cflags} ${CFLAGS}"
+                LDFLAGS="${libsodium_synthetic_libs} ${LDFLAGS}"
+                LIBS="${libsodium_synthetic_libs} ${LIBS}"
+
+                AC_SUBST([libsodium_CFLAGS],[${libsodium_synthetic_cflags}])
+                AC_SUBST([libsodium_LIBS],[${libsodium_synthetic_libs}])
+                was_libsodium_check_lib_detected=yes
+                AC_DEFINE(HAVE_LIBSODIUM, 1, [The libsodium library is to be used.])
+            ],
+            [])
+    ])
+
+if test "x$was_libsodium_check_lib_detected" = "xno"; then
+    CFLAGS="${libsodium_CFLAGS} ${CFLAGS}"
+    LIBS="${libsodium_LIBS} ${LIBS}"
+fi
+
+
+was_libzmq_check_lib_detected=no
+
+PKG_CHECK_MODULES([libzmq], [libzmq >= 0.0.0],
+    [
+    ],
+    [
+        AC_ARG_WITH([libzmq],
+            [
+                AS_HELP_STRING([--with-libzmq],
+                [Specify libzmq prefix])
+            ],
+            [search_libzmq="yes"],
+            [])
+
+        libzmq_synthetic_cflags=""
+        libzmq_synthetic_libs="-lzmq"
+
+        if test "x$search_libzmq" = "xyes"; then
+            if test -r "${with_libzmq}/include/zmq.h"; then
+                libzmq_synthetic_cflags="-I${with_libzmq}/include"
+                libzmq_synthetic_libs="-L${with_libzmq}/lib -lzmq"
+            else
+                AC_MSG_ERROR([${with_libzmq}/include/zmq.h not found. Please check libzmq prefix])
+            fi
+        fi
+
+        AC_CHECK_LIB([libzmq], [zmq_init],
+            [
+                CFLAGS="${libzmq_synthetic_cflags} ${CFLAGS}"
+                LDFLAGS="${libzmq_synthetic_libs} ${LDFLAGS}"
+                LIBS="${libzmq_synthetic_libs} ${LIBS}"
+
+                AC_SUBST([libzmq_CFLAGS],[${libzmq_synthetic_cflags}])
+                AC_SUBST([libzmq_LIBS],[${libzmq_synthetic_libs}])
+                was_libzmq_check_lib_detected=yes
+            ],
+            [AC_MSG_ERROR([cannot link with -lzmq, install libzmq.])])
+    ])
+
+if test "x$was_libzmq_check_lib_detected" = "xno"; then
+    CFLAGS="${libzmq_CFLAGS} ${CFLAGS}"
+    LIBS="${libzmq_LIBS} ${LIBS}"
 fi
 
 
 was_czmq_check_lib_detected=no
 
-PKG_CHECK_MODULES([czmq], [libczmq],,
+PKG_CHECK_MODULES([czmq], [libczmq >= 0.0.0],
+    [
+    ],
     [
         AC_ARG_WITH([libczmq],
             [
@@ -109,12 +190,12 @@ PKG_CHECK_MODULES([czmq], [libczmq],,
             fi
         fi
 
-        CFLAGS="${czmq_synthetic_cflags} ${CFLAGS}"
-        LDFLAGS="${czmq_synthetic_libs} ${LDFLAGS}"
-        LIBS="${czmq_synthetic_libs} ${LIBS}"
-
-        AC_CHECK_LIB([czmq], [zctx_test],
+        AC_CHECK_LIB([libczmq], [zctx_test],
             [
+                CFLAGS="${czmq_synthetic_cflags} ${CFLAGS}"
+                LDFLAGS="${czmq_synthetic_libs} ${LDFLAGS}"
+                LIBS="${czmq_synthetic_libs} ${LIBS}"
+
                 AC_SUBST([czmq_CFLAGS],[${czmq_synthetic_cflags}])
                 AC_SUBST([czmq_LIBS],[${czmq_synthetic_libs}])
                 was_czmq_check_lib_detected=yes
@@ -128,73 +209,45 @@ if test "x$was_czmq_check_lib_detected" = "xno"; then
 fi
 
 
-was_sodium_check_lib_detected=no
-
-PKG_CHECK_MODULES([sodium], [libsodium],,
-    [
-        AC_ARG_WITH([libsodium],
-            [
-                AS_HELP_STRING([--with-libsodium],
-                [Specify libsodium prefix])
-            ],
-            [search_libsodium="yes"],
-            [])
-
-        sodium_synthetic_cflags=""
-        sodium_synthetic_libs="-lsodium"
-
-        if test "x$search_libsodium" = "xyes"; then
-            if test -r "${with_libsodium}/include/sodium.h"; then
-                sodium_synthetic_cflags="-I${with_libsodium}/include"
-                sodium_synthetic_libs="-L${with_libsodium}/lib -lsodium"
-            else
-                AC_MSG_ERROR([${with_libsodium}/include/sodium.h not found. Please check libsodium prefix])
-            fi
-        fi
-
-        CFLAGS="${sodium_synthetic_cflags} ${CFLAGS}"
-        LDFLAGS="${sodium_synthetic_libs} ${LDFLAGS}"
-        LIBS="${sodium_synthetic_libs} ${LIBS}"
-
-        AC_CHECK_LIB([sodium], [sodium_init],
-            [
-                AC_SUBST([sodium_CFLAGS],[${sodium_synthetic_cflags}])
-                AC_SUBST([sodium_LIBS],[${sodium_synthetic_libs}])
-                was_sodium_check_lib_detected=yes
-            ],
-            [AC_MSG_ERROR([cannot link with -lsodium, install libsodium.])])
-    ])
-
-if test "x$was_sodium_check_lib_detected" = "xno"; then
-    CFLAGS="${sodium_CFLAGS} ${CFLAGS}"
-    LIBS="${sodium_LIBS} ${LIBS}"
-fi
-
-
 CFLAGS="${PREVIOUS_CFLAGS}"
 LIBS="${PREVIOUS_LIBS}"
 
 # Platform specific checks
 curve_on_mingw32="no"
+curve_on_cygwin="no"
 curve_on_android="no"
+curve_on_linux="no"
+curve_on_gnu="no"
 
 # Host specific checks
 AC_CANONICAL_HOST
 
-# Determine whether or not documentation should be built and installed.
-curve_build_doc="yes"
-curve_install_man="yes"
+# Man pages are built/installed if asciidoc and xmlto are present
+#   --with-docs=no overrides this
+AC_ARG_WITH([docs],
+    AS_HELP_STRING([--with-docs],
+        [Build and install man pages [default=yes]]),
+    [with_docs=$withval])
 
-# Check for asciidoc and xmlto and don't build the docs if these are not installed.
-AC_CHECK_PROG(curve_have_asciidoc, asciidoc, yes, no)
-AC_CHECK_PROG(curve_have_xmlto, xmlto, yes, no)
-if test "x$curve_have_asciidoc" = "xno" -o "x$curve_have_xmlto" = "xno"; then
+if test "x$with_docs" = "xno"; then
     curve_build_doc="no"
-    # Tarballs built with 'make dist' ship with prebuilt documentation.
-    if ! test -f doc/curve.7; then
-        curve_install_man="no"
-        AC_MSG_WARN([You are building an unreleased version of CURVE and asciidoc or xmlto are not installed.])
-        AC_MSG_WARN([Documentation will not be built and manual pages will not be installed.])
+    curve_install_man="no"
+else
+    # Determine whether or not documentation should be built and installed.
+    curve_build_doc="yes"
+    curve_install_man="yes"
+
+    # Check for asciidoc and xmlto and don't build the docs if these are not installed.
+    AC_CHECK_PROG(curve_have_asciidoc, asciidoc, yes, no)
+    AC_CHECK_PROG(curve_have_xmlto, xmlto, yes, no)
+    if test "x$curve_have_asciidoc" = "xno" -o "x$curve_have_xmlto" = "xno"; then
+        curve_build_doc="no"
+        # Tarballs built with 'make dist' ship with prebuilt documentation.
+        if ! test -f doc/curve.7; then
+            curve_install_man="no"
+            AC_MSG_WARN([You are building an unreleased version of CURVE and asciidoc or xmlto are not installed.])
+            AC_MSG_WARN([Documentation will not be built and manual pages will not be installed.])
+        fi
     fi
 fi
 AC_MSG_CHECKING([whether to build documentation])
@@ -211,7 +264,8 @@ case "${host_os}" in
         # Define on Linux to enable all library features
         CPPFLAGS="-D_GNU_SOURCE -DLINUX $CPPFLAGS"
         AC_DEFINE(CURVE_HAVE_LINUX, 1, [Have Linux OS])
-        
+        curve_on_linux="yes"
+
         case "${host_os}" in
             *android*)
                 AC_DEFINE(CURVE_HAVE_ANDROID, 1, [Have Android OS])
@@ -267,6 +321,15 @@ case "${host_os}" in
         # Define on Cygwin to enable all library features
         CPPFLAGS="-D_GNU_SOURCE $CPPFLAGS"
         AC_DEFINE(CURVE_HAVE_CYGWIN, 1, [Have Cygwin])
+        curve_on_cygwin="yes"
+        ;;
+    gnu*)
+        # Define on GNU/Hurd to enable all library features
+        if test "x$GXX" = "xyes"; then
+            CPPFLAGS="-D_GNU_SOURCE $CPPFLAGS"
+        fi
+        AC_DEFINE(CURVE_HAVE_GNU, 1, [Have GNU/Hurd OS])
+        curve_on_gnu="yes"
         ;;
     *)
         AC_MSG_ERROR([unsupported system: ${host_os}.])
@@ -295,17 +358,31 @@ AC_TYPE_SSIZE_T
 AC_HEADER_TIME
 AC_TYPE_UINT32_T
 AC_C_VOLATILE
+AC_C_BIGENDIAN
 
 # These options are GNU compiler specific.
 if test "x$GCC" = "xyes"; then
     CPPFLAGS="-pedantic -Werror -Wall -Wc++-compat ${CPPFLAGS}"
 fi
 
+AM_CONDITIONAL(ENABLE_SHARED, test "x$enable_shared" = "xyes")
 AM_CONDITIONAL(ON_MINGW, test "x$curve_on_mingw32" = "xyes")
+AM_CONDITIONAL(ON_CYGWIN, test "x$curve_on_cygwin" = "xyes")
 AM_CONDITIONAL(ON_ANDROID, test "x$curve_on_android" = "xyes")
+AM_CONDITIONAL(ON_LINUX, test "x$curve_on_linux" = "xyes")
+AM_CONDITIONAL(ON_GNU, test "x$curve_on_gnu" = "xyes")
 AM_CONDITIONAL(INSTALL_MAN, test "x$curve_install_man" = "xyes")
 AM_CONDITIONAL(BUILD_DOC, test "x$curve_build_doc" = "xyes")
-AM_CONDITIONAL([ENABLE_LABS], [test "x$enable_labs" = "xyes"])
+
+# Check for curve_selftest intent
+AC_ARG_ENABLE([curve_selftest],
+    AS_HELP_STRING([--enable-curve_selftest],
+        [Compile 'curve_selftest' in src [default=yes].]),
+    [enable_curve_selftest=$enableval],
+    [enable_curve_selftest=yes])
+
+AM_CONDITIONAL([ENABLE_CURVE_SELFTEST], [test x$enable_curve_selftest != xno])
+AM_COND_IF([ENABLE_CURVE_SELFTEST], [AC_MSG_NOTICE([ENABLE_CURVE_SELFTEST defined])])
 
 # Checks for library functions.
 AC_TYPE_SIGNAL
@@ -317,10 +394,60 @@ AC_ARG_WITH([pkgconfigdir], AS_HELP_STRING([--with-pkgconfigdir=PATH],
     [pkgconfigdir="$withval"], [pkgconfigdir='${libdir}/pkgconfig'])
 AC_SUBST([pkgconfigdir])
 
-# Specify output files
-AC_CONFIG_FILES([Makefile doc/Makefile src/libcurve.pc])
-AC_OUTPUT
 
+# enable specific system integration features
+AC_ARG_WITH([systemd],
+    AS_HELP_STRING([--with-systemd],
+    [Build and install with systemd integration [default=no].]),
+    [with_systemd=$withval],
+    [with_systemd=no])
+
+AM_CONDITIONAL([WITH_SYSTEMD], [test x$with_systemd != xno])
+
+AM_COND_IF([WITH_SYSTEMD],
+    [PKG_CHECK_MODULES([SYSTEMD], [systemd >= 200], [],
+        [AC_MSG_ERROR([Cannot find required package for systemd. Note, pkg-config is required due to specified version >= 200])])],
+    [])
+
+if test "x$cross_compiling" = "xyes"; then
+    #   Enable draft by default when cross-compiling
+    gitmaster=yes
+else
+    # enable draft API by default if we're in a git repository
+    # else disable it by default; then allow --enable-drafts=yes/no override
+    AC_CHECK_FILE(.git, [gitmaster=yes], [gitmaster=no])
+fi
+
+AC_ARG_ENABLE([drafts],
+    AS_HELP_STRING([--enable-drafts],
+        [Build and install draft classes and methods [default=yes.]]),
+    [enable_drafts=$withval],
+    [enable_drafts=$gitmaster])
+
+AM_CONDITIONAL([ENABLE_DRAFTS], [test x$enable_drafts != xno])
+
+if test "x$enable_drafts" = "xyes"; then
+    AC_MSG_NOTICE([Building stable and legacy API + draft API])
+    AC_DEFINE(CURVE_BUILD_DRAFT_API, 1, [Provide draft classes and methods.])
+    AC_SUBST(pkg_config_defines, "-DCURVE_BUILD_DRAFT_API=1")
+else
+    AC_MSG_NOTICE([Building stable and legacy API (no draft API)])
+    AC_SUBST(pkg_config_defines, "")
+fi
+
+# Specify output files
+AC_CONFIG_FILES([Makefile
+                 doc/Makefile
+                 src/libcurve.pc
+                 ])
+
+AM_COND_IF([WITH_SYSTEMD],
+    [AC_CONFIG_FILES([
+    ])],
+    [])
+
+
+AC_OUTPUT
 ################################################################################
 #  THIS FILE IS 100% GENERATED BY ZPROJECT; DO NOT EDIT EXCEPT EXPERIMENTALLY  #
 #  Please refer to the README for information about making permanent changes.  #

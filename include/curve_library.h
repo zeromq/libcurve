@@ -1,5 +1,5 @@
 /*  =========================================================================
-    curve - CURVE wrapper
+    curve - generated layer of public API
 
     Copyright (c) the Contributors as noted in the AUTHORS file.         
     This file is part of the Curve authentication and encryption library.
@@ -15,12 +15,13 @@
     =========================================================================
 */
 
-#ifndef __curve_library_H_INCLUDED__
-#define __curve_library_H_INCLUDED__
+#ifndef CURVE_LIBRARY_H_INCLUDED
+#define CURVE_LIBRARY_H_INCLUDED
+
+//  Set up environment for the application
 
 //  External dependencies
 #include <czmq.h>
-#include <sodium.h>
 
 //  CURVE version macros for compile-time API detection
 
@@ -46,6 +47,9 @@
 #endif
 
 //  Opaque class structures to allow forward references
+//  These classes are stable or legacy and built in all releases
+//  Draft classes are by default not built stable releases
+#ifdef CURVE_BUILD_DRAFT_API
 typedef struct _curve_client_t curve_client_t;
 #define CURVE_CLIENT_T_DEFINED
 typedef struct _curve_server_t curve_server_t;
@@ -54,13 +58,16 @@ typedef struct _curve_codec_t curve_codec_t;
 #define CURVE_CODEC_T_DEFINED
 typedef struct _curve_z85_t curve_z85_t;
 #define CURVE_Z85_T_DEFINED
+#endif // CURVE_BUILD_DRAFT_API
 
 
-//  Public API classes
+//  Public classes, each with its own header file
+#ifdef CURVE_BUILD_DRAFT_API
 #include "curve_client.h"
 #include "curve_server.h"
 #include "curve_codec.h"
 #include "curve_z85.h"
+#endif // CURVE_BUILD_DRAFT_API
 
 #endif
 /*
