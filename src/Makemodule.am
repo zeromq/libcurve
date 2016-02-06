@@ -69,6 +69,8 @@ src:
 	src/curve_selftest \
 	src/libcurve.la
 
+	gsl -target:- project.xml
+
 check-local: src/curve_selftest
 	$(LIBTOOL) --mode=execute $(srcdir)/src/curve_selftest
 

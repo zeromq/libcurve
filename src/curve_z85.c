@@ -18,7 +18,7 @@
 @end
 */
 
-#include "../include/curve.h"
+#include "curve_classes.h"
 
 //  Maps base 256 to base 85
 static char encoder [85 + 1] = {

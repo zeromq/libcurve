@@ -12,10 +12,11 @@ AM_CFLAGS = \
 AM_CPPFLAGS = \
     ${libsodium_CFLAGS} \
     ${libzmq_CFLAGS} \
+    ${uuid_CFLAGS} \
     ${czmq_CFLAGS} \
     -I$(srcdir)/include
 
-project_libs = ${libsodium_LIBS} ${libzmq_LIBS} ${czmq_LIBS}
+project_libs = ${libsodium_LIBS} ${libzmq_LIBS} ${uuid_LIBS} ${czmq_LIBS}
 
 SUBDIRS = doc
 DIST_SUBDIRS = doc
@@ -27,11 +28,11 @@ noinst_LTLIBRARIES =
 TESTS =
 
 EXTRA_DIST = \
-    src/curve_classes.h \
     LICENSE \
     README.txt \
     README.md \
-    CONTRIBUTING.md
+    CONTRIBUTING.md \
+    src/curve_classes.h
 
 include $(srcdir)/src/Makemodule.am
 
