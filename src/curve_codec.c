@@ -20,9 +20,9 @@
 @end
 */
 
-#include "../include/curve.h"
+#include "curve_classes.h"
 
-#include <sodium.h>
+#include "sodium.h"
 #if crypto_box_PUBLICKEYBYTES != 32 \
  || crypto_box_SECRETKEYBYTES != 32 \
  || crypto_box_BEFORENMBYTES != 32 \

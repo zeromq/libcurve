@@ -20,7 +20,7 @@
 @end
 */
 
-#include "../include/curve.h"
+#include "curve_classes.h"
 
 //  Structure of our class
 struct _curve_client_t {
