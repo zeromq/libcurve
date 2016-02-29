@@ -7,6 +7,7 @@
     <include filename = "license.xml" />
     <version major = "1" minor = "0" patch = "0" />
     <use project = "czmq" />
+    <use project = "libsodium" />
     
     <!-- The order of the classes is NOT important -->
     <class name = "curve_client" />

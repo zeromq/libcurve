@@ -22,6 +22,7 @@
 
 //  External dependencies
 #include <czmq.h>
+#include <sodium.h>
 
 //  CURVE version macros for compile-time API detection
 #define CURVE_VERSION_MAJOR 1
