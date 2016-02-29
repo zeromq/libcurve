@@ -104,6 +104,17 @@ ELSE (CZMQ_FOUND)
 ENDIF (CZMQ_FOUND)
 
 ########################################################################
+# LIBSODIUM dependency
+########################################################################
+find_package(libsodium REQUIRED)
+IF (LIBSODIUM_FOUND)
+    include_directories(${LIBSODIUM_INCLUDE_DIRS})
+    list(APPEND MORE_LIBRARIES ${LIBSODIUM_LIBRARIES})
+ELSE (LIBSODIUM_FOUND)
+    message( FATAL_ERROR "libsodium not found." )
+ENDIF (LIBSODIUM_FOUND)
+
+########################################################################
 # includes
 ########################################################################
 set (curve_headers
@@ -195,6 +206,7 @@ target_link_libraries(
     curve
     ${LIBZMQ_LIBRARIES}
     ${CZMQ_LIBRARIES}
+    ${LIBSODIUM_LIBRARIES}
     ${OPTIONAL_LIBRARIES}
 )
 set_target_properties(
