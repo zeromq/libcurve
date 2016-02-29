@@ -54,7 +54,7 @@ PKG_PROG_PKG_CONFIG
 
 # Code coverage
 AC_ARG_WITH(gcov, [AS_HELP_STRING([--with-gcov=yes/no],
-                  [With GCC Code Coverage reporting.])],
+                  [With GCC Code Coverage reporting])],
                   [CURVE_GCOV="$withval"])
 
 if test "x${CURVE_GCOV}" == "xyes"; then
@@ -71,52 +71,6 @@ fi
 PREVIOUS_CFLAGS="${CFLAGS}"
 PREVIOUS_LIBS="${LIBS}"
 
-
-was_libsodium_check_lib_detected=no
-
-PKG_CHECK_MODULES([libsodium], [libsodium >= 0.0.0],
-    [
-        AC_DEFINE(HAVE_LIBSODIUM, 1, [The libsodium library is to be used.])
-    ],
-    [
-        AC_ARG_WITH([libsodium],
-            [
-                AS_HELP_STRING([--with-libsodium],
-                [Specify libsodium prefix])
-            ],
-            [search_libsodium="yes"],
-            [])
-
-        libsodium_synthetic_cflags=""
-        libsodium_synthetic_libs="-lsodium"
-
-        if test "x$search_libsodium" = "xyes"; then
-            if test -r "${with_libsodium}/include/sodium.h"; then
-                libsodium_synthetic_cflags="-I${with_libsodium}/include"
-                libsodium_synthetic_libs="-L${with_libsodium}/lib -lsodium"
-            else
-                AC_MSG_ERROR([${with_libsodium}/include/sodium.h not found. Please check libsodium prefix])
-            fi
-        fi
-
-        AC_CHECK_LIB([libsodium], [sodium_init],
-            [
-                CFLAGS="${libsodium_synthetic_cflags} ${CFLAGS}"
-                LDFLAGS="${libsodium_synthetic_libs} ${LDFLAGS}"
-                LIBS="${libsodium_synthetic_libs} ${LIBS}"
-
-                AC_SUBST([libsodium_CFLAGS],[${libsodium_synthetic_cflags}])
-                AC_SUBST([libsodium_LIBS],[${libsodium_synthetic_libs}])
-                was_libsodium_check_lib_detected=yes
-                AC_DEFINE(HAVE_LIBSODIUM, 1, [The libsodium library is to be used.])
-            ],
-            [])
-    ])
-
-if test "x$was_libsodium_check_lib_detected" = "xno"; then
-    CFLAGS="${libsodium_CFLAGS} ${CFLAGS}"
-    LIBS="${libsodium_LIBS} ${LIBS}"
-fi
 
 was_libzmq_check_lib_detected=no
 
@@ -154,7 +108,7 @@ PKG_CHECK_MODULES([libzmq], [libzmq >= 0.0.0],
                 AC_SUBST([libzmq_LIBS],[${libzmq_synthetic_libs}])
                 was_libzmq_check_lib_detected=yes
             ],
-            [AC_MSG_ERROR([cannot link with -lzmq, install libzmq.])])
+            [AC_MSG_ERROR([cannot link with -lzmq, install libzmq])])
     ])
 
 if test "x$was_libzmq_check_lib_detected" = "xno"; then
@@ -166,7 +120,7 @@ was_uuid_check_lib_detected=no
 
 PKG_CHECK_MODULES([uuid], [uuid >= 0.0.0],
     [
-        AC_DEFINE(HAVE_UUID, 1, [The uuid library is to be used.])
+        AC_DEFINE(HAVE_UUID, 1, [The uuid library is to be used])
     ],
     [
         AC_ARG_WITH([uuid],
@@ -198,7 +152,7 @@ PKG_CHECK_MODULES([uuid], [uuid >= 0.0.0],
                 AC_SUBST([uuid_CFLAGS],[${uuid_synthetic_cflags}])
                 AC_SUBST([uuid_LIBS],[${uuid_synthetic_libs}])
                 was_uuid_check_lib_detected=yes
-                AC_DEFINE(HAVE_UUID, 1, [The uuid library is to be used.])
+                AC_DEFINE(HAVE_UUID, 1, [The uuid library is to be used])
             ],
             [])
     ])
@@ -244,7 +198,7 @@ PKG_CHECK_MODULES([czmq], [libczmq >= 0.0.0],
                 AC_SUBST([czmq_LIBS],[${czmq_synthetic_libs}])
                 was_czmq_check_lib_detected=yes
             ],
-            [AC_MSG_ERROR([cannot link with -lczmq, install libczmq.])])
+            [AC_MSG_ERROR([cannot link with -lczmq, install libczmq])])
     ])
 
 if test "x$was_czmq_check_lib_detected" = "xno"; then
@@ -375,7 +329,7 @@ case "${host_os}" in
         curve_on_gnu="yes"
         ;;
     *)
-        AC_MSG_ERROR([unsupported system: ${host_os}.])
+        AC_MSG_ERROR([unsupported system: ${host_os}])
         ;;
 esac
 
@@ -420,7 +374,7 @@ AM_CONDITIONAL(BUILD_DOC, test "x$curve_build_doc" = "xyes")
 # Check for curve_selftest intent
 AC_ARG_ENABLE([curve_selftest],
     AS_HELP_STRING([--enable-curve_selftest],
-        [Compile 'curve_selftest' in src [default=yes].]),
+        [Compile 'curve_selftest' in src [default=yes]]),
     [enable_curve_selftest=$enableval],
     [enable_curve_selftest=yes])
 
@@ -439,39 +393,26 @@ AC_SUBST([pkgconfigdir])
 
 
 # enable specific system integration features
-AC_ARG_WITH([systemd],
-    AS_HELP_STRING([--with-systemd],
-    [Build and install with systemd integration [default=no].]),
-    [with_systemd=$withval],
-    [with_systemd=no])
+AC_ARG_WITH([systemd-units],
+    AS_HELP_STRING([--with-systemd-units],
+    [Build and install with systemd units integration [default=no]]),
+    [with_systemd_units=$withval],
+    [with_systemd_units=no])
 
-AM_CONDITIONAL([WITH_SYSTEMD], [test x$with_systemd != xno])
+AM_CONDITIONAL([WITH_SYSTEMD_UNITS], [test x$with_systemd_units != xno])
 
-AM_COND_IF([WITH_SYSTEMD],
-    [PKG_CHECK_MODULES([SYSTEMD], [systemd >= 200], [],
-        [AC_MSG_ERROR([Cannot find required package for systemd. Note, pkg-config is required due to specified version >= 200])])],
+AM_COND_IF([WITH_SYSTEMD_UNITS],
+    [AC_DEFINE(WITH_SYSTEMD_UNITS, 1, [systemd units are going to be installed])
+    AC_SUBST(WITH_SYSTEMD_UNITS)],
     [])
 
-if test "x$cross_compiling" = "xyes"; then
-    #   Enable draft by default when cross-compiling
-    gitmaster=yes
-else
-    # enable draft API by default if we're in a git repository
-    # else disable it by default; then allow --enable-drafts=yes/no override
-    AC_CHECK_FILE($srcdir/.git, [gitmaster=yes], [gitmaster=no])
-fi
-
-AC_ARG_ENABLE([drafts],
-    AS_HELP_STRING([--enable-drafts],
-        [Build and install draft classes and methods [default=yes.]]),
-    [enable_drafts=$withval],
-    [enable_drafts=$gitmaster])
-
+#   Project has no stable classes so enable draft API by default
+enable_drafts=yes
 AM_CONDITIONAL([ENABLE_DRAFTS], [test x$enable_drafts != xno])
 
 if test "x$enable_drafts" = "xyes"; then
     AC_MSG_NOTICE([Building stable and legacy API + draft API])
-    AC_DEFINE(CURVE_BUILD_DRAFT_API, 1, [Provide draft classes and methods.])
+    AC_DEFINE(CURVE_BUILD_DRAFT_API, 1, [Provide draft classes and methods])
     AC_SUBST(pkg_config_defines, "-DCURVE_BUILD_DRAFT_API=1")
 else
     AC_MSG_NOTICE([Building stable and legacy API (no draft API)])
@@ -484,7 +425,7 @@ AC_CONFIG_FILES([Makefile
                  src/libcurve.pc
                  ])
 
-AM_COND_IF([WITH_SYSTEMD],
+AM_COND_IF([WITH_SYSTEMD_UNITS],
     [AC_CONFIG_FILES([
     ])],
     [])
