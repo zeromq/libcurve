@@ -16,15 +16,7 @@ set(SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 ########################################################################
 # options
 ########################################################################
-if (EXISTS "${SOURCE_DIR}/.git")
-    OPTION (ENABLE_DRAFTS "Build and install draft classes and methods" ON)
-else ()
-    OPTION (ENABLE_DRAFTS "Build and install draft classes and methods" OFF)
-endif ()
-
-IF (ENABLE_DRAFTS)
-    ADD_DEFINITIONS (-DCURVE_BUILD_DRAFT_API)
-ENDIF (ENABLE_DRAFTS)
+ADD_DEFINITIONS (-DCURVE_BUILD_DRAFT_API)
 
 ########################################################################
 # platform.h
@@ -77,17 +69,6 @@ endif()
 
 list(APPEND CMAKE_MODULE_PATH "${SOURCE_DIR}")
 set(OPTIONAL_LIBRARIES)
-
-########################################################################
-# LIBSODIUM dependency
-########################################################################
-find_package(libsodium)
-IF (LIBSODIUM_FOUND)
-    include_directories(${LIBSODIUM_INCLUDE_DIRS})
-    list(APPEND MORE_LIBRARIES ${LIBSODIUM_LIBRARIES})
-    add_definitions(-DHAVE_LIBSODIUM)
-    list(APPEND OPTIONAL_LIBRARIES ${LIBSODIUM_LIBRARIES})
-ENDIF (LIBSODIUM_FOUND)
 
 ########################################################################
 # LIBZMQ dependency

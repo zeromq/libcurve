@@ -8,6 +8,7 @@ before_script:
 #   libsodium
 - git clone git://github.com/jedisct1/libsodium.git
 - cd libsodium
+- git checkout stable
 - ./autogen.sh
 - ./configure && make check
 - sudo make install

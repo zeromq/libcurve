@@ -24,7 +24,6 @@
 #include <czmq.h>
 
 //  CURVE version macros for compile-time API detection
-
 #define CURVE_VERSION_MAJOR 1
 #define CURVE_VERSION_MINOR 0
 #define CURVE_VERSION_PATCH 0
@@ -35,9 +34,9 @@
     CURVE_MAKE_VERSION(CURVE_VERSION_MAJOR, CURVE_VERSION_MINOR, CURVE_VERSION_PATCH)
 
 #if defined (__WINDOWS__)
-#   if defined LIBCURVE_STATIC
+#   if defined CURVE_STATIC
 #       define CURVE_EXPORT
-#   elif defined LIBCURVE_EXPORTS
+#   elif defined CURVE_EXPORTS
 #       define CURVE_EXPORT __declspec(dllexport)
 #   else
 #       define CURVE_EXPORT __declspec(dllimport)
@@ -46,9 +45,13 @@
 #   define CURVE_EXPORT
 #endif
 
+//  Project has no stable classes, so we build the draft API
+#undef  CURVE_BUILD_DRAFT_API
+#define CURVE_BUILD_DRAFT_API
+
 //  Opaque class structures to allow forward references
 //  These classes are stable or legacy and built in all releases
-//  Draft classes are by default not built stable releases
+//  Draft classes are by default not built in stable releases
 #ifdef CURVE_BUILD_DRAFT_API
 typedef struct _curve_client_t curve_client_t;
 #define CURVE_CLIENT_T_DEFINED
