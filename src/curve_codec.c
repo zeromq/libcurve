@@ -231,7 +231,7 @@ s_raise_exception (curve_codec_t *self, char *error_text)
 //  Encrypt a block of data using the connection nonce. If
 //  key_to/key_from are null, uses precomputed key.
 
-static void
+static int
 s_encrypt (
     curve_codec_t *self,    //  Codec instance sending the data
     byte *target,           //  target must be nonce + box
@@ -277,14 +277,14 @@ s_encrypt (
         rc = crypto_box (box, plain, box_size, nonce, key_to, key_from);
     else
         rc = crypto_box_afternm (box, plain, box_size, nonce, self->precomputed);
-    //  These calls must always succeed
-    assert (rc == 0);
 
     //  Now copy encrypted data into target; it will be 16 bytes longer than
     //  plain data
     memcpy (target, box + crypto_box_BOXZEROBYTES, size + 16);
     free (plain);
     free (box);
+    
+    return rc;
 }
 
 
@@ -489,7 +489,9 @@ s_produce_hello (curve_codec_t *self)
     memcpy (hello->id, "\x05HELLO", 6);
 
     memcpy (hello->client, zcert_public_key (self->transcert), 32);
-    byte signature [64] = { 0 };
+    byte signature [64];
+    memset (signature, 0, 64);
+
     s_encrypt (self, hello->nonce,
                signature, 64,
                "CurveZMQHELLO---",

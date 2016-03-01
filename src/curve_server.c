@@ -677,7 +677,7 @@ curve_server_test (bool verbose)
     assert (auth);
     zauth_set_verbose (auth, verbose);
     zauth_configure_curve (auth, "*", TESTDIR);
-    
+
     //  We'll run a set of clients as background tasks, and the
     //  server in this foreground thread. Don't pass verbose to
     //  the clients as the results are unreadable.
@@ -710,12 +710,12 @@ curve_server_test (bool verbose)
     };
     assert (zmq_poll (pollitems, 1, 250) == 0);
     curve_client_destroy (&client);
- 
+
     //  Delete all test files
     zdir_t *dir = zdir_new (TESTDIR, NULL);
     zdir_remove (dir, true);
     zdir_destroy (&dir);
-    
+
     curve_server_destroy (&server);
     zauth_destroy (&auth);
     zctx_destroy (&ctx);
