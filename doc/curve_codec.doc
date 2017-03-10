@@ -5,10 +5,11 @@ zframes. All I/O is the responsibility of the caller. This is the
 reference implementation of CurveZMQ. You will not normally want to use
 it directly in application code as the API is low-level and complex.
 
-Please add @discuss section in ../src/curve_codec.c.
+Please add '@discuss' section in './../src/curve_codec.c'.
 
 This is the class interface:
 
+```h
     //  Create a new curve_codec client instance. Caller provides the
     //  permanent cert for the client.
     CZMQ_EXPORT curve_codec_t *
@@ -72,9 +73,12 @@ This is the class interface:
     //  Self test of this class
     void
         curve_codec_test (bool verbose);
+```
+Please add '@interface' section in './../src/curve_codec.c'.
 
 This is the class self test code:
 
+```c
     //  For the test case, we'll put the client and server certs into the
     //  the same keystore file. This is now how it would work in real life.
     //
@@ -121,7 +125,7 @@ This is the class self test code:
         zframe_send (&output, router, 0);
     }
     //  Check client metadata
-    char *client_name = zhash_lookup (curve_codec_metadata (server), "client");
+    char *client_name = (char *) zhash_lookup (curve_codec_metadata (server), "client");
     assert (client_name);
     assert (streq (client_name, "CURVEZMQ/curve_codec"));
     
@@ -293,4 +297,5 @@ This is the class self test code:
     zdir_t *dir = zdir_new (TESTDIR, NULL);
     zdir_remove (dir, true);
     zdir_destroy (&dir);
+```
 
