@@ -3,7 +3,7 @@ curve_codec(3)
 
 NAME
 ----
-curve_codec - core CurveZMQ engine (rfc.zeromq.org/spec:26)
+curve_codec - Class for core CurveZMQ engine (rfc.zeromq.org/spec:26)
 
 SYNOPSIS
 --------
@@ -71,6 +71,7 @@ CZMQ_EXPORT zhash_t *
 //  Self test of this class
 void
     curve_codec_test (bool verbose);
+Please add '@interface' section in './../src/curve_codec.c'.
 ----
 
 DESCRIPTION
@@ -81,7 +82,7 @@ zframes. All I/O is the responsibility of the caller. This is the
 reference implementation of CurveZMQ. You will not normally want to use
 it directly in application code as the API is low-level and complex.
 
-Please add @discuss section in ../src/curve_codec.c.
+Please add '@discuss' section in './../src/curve_codec.c'.
 
 EXAMPLE
 -------
@@ -133,7 +134,7 @@ while (!curve_codec_connected (server)) {
     zframe_send (&output, router, 0);
 }
 //  Check client metadata
-char *client_name = zhash_lookup (curve_codec_metadata (server), "client");
+char *client_name = (char *) zhash_lookup (curve_codec_metadata (server), "client");
 assert (client_name);
 assert (streq (client_name, "CURVEZMQ/curve_codec"));
 

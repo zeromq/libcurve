@@ -1,12 +1,13 @@
-#### curve_z85 - Z85 encoding and decoding, see 0MQ RFC 32
+#### curve_z85 - Z85 encoding and decoding, see ZeroMQ RFC 32
 
 Provides an API to encode and decode CurveZMQ keys to/from Z85, 
 a text format designed for easier interchange.
 
-Please add @discuss section in ../src/curve_z85.c.
+Please add '@discuss' section in './../src/curve_z85.c'.
 
 This is the class interface:
 
+```h
     //  Encode a binary frame as a string; destination string MUST be at least
     //  size * 5 / 4 bytes long. Returns dest. Size must be a multiple of 4.
     CZMQ_EXPORT char *
@@ -19,11 +20,14 @@ This is the class interface:
         curve_z85_decode (uint8_t *dest, char *string);
         
     //  Self test of this class
-    void
+    CZMQ_EXPORT void
         curve_z85_test (bool verbose);
+```
+Please add '@interface' section in './../src/curve_z85.c'.
 
 This is the class self test code:
 
+```c
     byte test_data_1 [8] = {
         0x86, 0x4F, 0xD2, 0x6F, 0xB5, 0x59, 0xF7, 0x5B
     };
@@ -82,4 +86,5 @@ This is the class self test code:
     };
     curve_z85_encode (encoded, server_public, 32);
     curve_z85_encode (encoded, server_secret, 32);
+```
 

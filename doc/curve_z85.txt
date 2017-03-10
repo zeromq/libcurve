@@ -3,7 +3,7 @@ curve_z85(3)
 
 NAME
 ----
-curve_z85 - Z85 encoding and decoding, see 0MQ RFC 32
+curve_z85 - Class for Z85 encoding and decoding, see ZeroMQ RFC 32
 
 SYNOPSIS
 --------
@@ -20,8 +20,9 @@ CZMQ_EXPORT uint8_t *
     curve_z85_decode (uint8_t *dest, char *string);
     
 //  Self test of this class
-void
+CZMQ_EXPORT void
     curve_z85_test (bool verbose);
+Please add '@interface' section in './../src/curve_z85.c'.
 ----
 
 DESCRIPTION
@@ -30,7 +31,7 @@ DESCRIPTION
 Provides an API to encode and decode CurveZMQ keys to/from Z85, 
 a text format designed for easier interchange.
 
-Please add @discuss section in ../src/curve_z85.c.
+Please add '@discuss' section in './../src/curve_z85.c'.
 
 EXAMPLE
 -------

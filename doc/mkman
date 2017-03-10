@@ -2,9 +2,21 @@
 #
 #   mkman - Generates man pages from C source and header files.
 #
-#   Syntax: './mkman classname', in doc subdirectory.
+#   Syntax: './mkman srcname [outp rootsrcdir]'
+#   Must be executed in doc/ subdirectory under build workspace root.
+#     srcname - basename of .c or .cc source file located directly in the
+#               $rootsrcdir/src/ directory. For classes (MAN3) also implies
+#               a header (.h) file located directly in $rootsrcdir/include/.
+#     outp    - (optional) filename without extension (will be chopped if
+#               provided) of the resulting TXT and DOC files; may be a
+#               slash-separated path e.g. for out-of-tree builds (distcheck).
+#               Defaults to: "$srcname"
+#     rootsrcdir - (optional) location of project source root (may differ
+#               from build root) where to look for input source-code files.
+#               Defaults to: ".." (good for in-tree builds)
 #
 #   Copyright (c) 1996-2016 iMatix Corporation
+#   Copyright (c) 2016-2017 zproject community
 #
 #   This is free software; you can redistribute it and/or modify it under the
 #   terms of the GNU General Public License as published by the Free Software
@@ -20,6 +32,7 @@
 #   with this program. If not, see <http://www.gnu.org/licenses/>.
 #
 use File::Basename;
+use Cwd;
 
 sub pull {
     local ($_) = @_;
@@ -28,22 +41,27 @@ sub pull {
         $tag = $2;
         $opts = $4;
         $text = "";
-        die "Can't read $file: $!"
+        $ext = (fileparse("$file", qr/[^.]*/))[2];
+        die "Can't read '$file': $!"
             unless open (SOURCE, $file);
+
         while (<SOURCE>) {
             if (/$tag/) {
                 while (<SOURCE>) {
-                    last if /\@discuss/ || /\@end/ || /\@ignore/;
-                    $_ = "    $_" if $opts eq "code";
-                    s/^    // if $opts eq "left";
-                    $_ = "    $_" if $opts eq "test";
-                    s/^        /    / if $opts eq "test";
+                    last if /\@discuss/ || /\@end/ || /\@ignore/ || /\@header/;
+                    $_ = "    $_" if ($opts eq "code");
+                    s/^    // if ($opts eq "left");
+                    $_ = "    $_" if ($opts eq "test");
+                    s/^        /    / if ($opts eq "test");
                     $text .= $_;
                 }
             }
         }
         close (SOURCE);
-        $text = "Please add $tag section in $file.\n" unless $text;
+        # Add code fences for markdown highlighting
+        $text = "```$ext\n$text```\n" if (length $text) and ($opts eq "code" or $opts eq "test");
+
+        $text = "Please add '$tag' section in '$file'.\n" unless $text;
         return $text;
     }
     else {
@@ -52,43 +70,71 @@ sub pull {
 }
 
 sub generate_manpage {
-    local ($name) = @_;
-    $name = $1 if $name =~ /(\w+)\.\w+/;
+    local ($name, $outp, $rootsrcdir) = @_;
+    $name = $1 if $name =~ /(\w+)\.\w+/; # Chop off extensions
+    $outp = $1 if $outp =~ /^(.+)\.[^\.\/]+$/;
+    $outp_basename = basename ($outp);
+    $outp_basename = $2 if $outp =~ /^(.*\/)?(\w+)$/;
+
+    if ($ENV{"V"} == "1") {
+        printf "D: generate_manpage() got name='$name' outp='$outp' outp_basename='$outp_basename' rootsrcdir='$rootsrcdir'\n";
+    }
 
     #   Check if we're making the man page for a main program, or a class
-
     $cat = 0;           #   Unknown category
-    exit unless open (MAKEFILE, "Makefile");
+    $cat_text = "";
+    die "Can't open '" . cwd() . "/Makefile'"
+        unless open (MAKEFILE, "Makefile");
     while (<MAKEFILE>) {
-        if (/MAN1.*$name\.1/) {
-            $source = "../src/$name.c";
-            $header = "../src/$name.c";
+        if (/MAN1.*$outp_basename\.1/) {
+            $source = "$rootsrcdir/src/$name.c";
+            $header = "$rootsrcdir/src/$name.c";
             $cat = 1;
+            $cat_text = "Program for ";
             last;
         }
         elsif (/MAN3.*$name\.3/) {
-            $source = "../src/$name.c";
-            $header = "../include/$name.h";
+            $source = "$rootsrcdir/src/$name.c";
+            $header = "$rootsrcdir/include/$name.h";
             $cat = 3;
+            $cat_text = "Class for ";
             last;
         }
     }
     close MAKEFILE;
 
+    die "The Makefile defined no manpage category for $outp_basename.1 or $name.3"
+        unless ($source ne "");
+
     #   Look for class title in 2nd line of source
     #   If there's no class file, leave hand-written man page alone
-    exit unless open (SOURCE, $source);
+    if (! open (SOURCE, $source)) {
+        # Support mixed-source projects (named C in config,
+        # but having both .c and .cc files in reality)
+        printf "Can't open C '$source', retry for C++\n";
+        if ($header eq $source) {
+            $header .= "c";
+        }
+        $source .= "c"; # Retry for a *.cc filename
+    }
+    die "Can't open '$source'"
+        unless open (SOURCE, $source);
+    # NOTE: This duplication of lines is needed for proper work:
     $_ = <SOURCE>;
     $_ = <SOURCE>;
     $title = "no title found";
     $title = $1 if (/    \w+ - (.*)/);
     close (SOURCE);
 
+    printf "  MKMAN[txt]\t$source ";
+    if ($source ne $header) {
+        printf "+ $header ";
+    }
+    printf "\t=> $outp.txt\n";
     #   Open output file
-    die "Can't create $name.txt: $!"
-        unless open (OUTPUT, ">$name.txt");
+    die "Can't create '$outp.txt': $!"
+        unless open (OUTPUT, ">$outp.txt");
 
-    printf "Generating $name.txt...\n";
     $underline = "=" x (length ($name) + 3);
 
     $template = <<"END";
@@ -97,12 +143,13 @@ $underline
 
 NAME
 ----
-$name - $title
+$outp_basename - $cat_text$title
 
 SYNOPSIS
 --------
 ----
 pull $header\@interface
+pull $source\@interface,left
 ----
 
 DESCRIPTION
@@ -129,18 +176,25 @@ END
             print OUTPUT $_;
         }
     }
+    close OUTPUT;
 
     #   Generate a simple text documentation for README.txt
-    close OUTPUT;
-    printf "Generating $name.doc...\n";
-    die "Can't create $name.doc: $!"
-        unless open (OUTPUT, ">$name.doc");
-    print OUTPUT "#### $name - $title\n\n";
+    printf "  MKMAN[doc]\t$source ";
+    if ($source ne $header) {
+        printf "+ $header ";
+    }
+    printf "\t=> $outp.doc\n";
+
+    die "Can't create '$outp.doc': $!"
+        unless open (OUTPUT, ">$outp.doc");
+
+    print OUTPUT "#### $outp_basename - $title\n\n";
     print OUTPUT pull ("$source\@header,left");
     print OUTPUT "\n";
     print OUTPUT pull ("$source\@discuss,left");
     print OUTPUT "\nThis is the class interface:\n\n";
     print OUTPUT pull ("$header\@interface,code");
+    print OUTPUT pull ("$source\@interface,left");
     print OUTPUT "\nThis is the class self test code:\n\n";
     print OUTPUT pull ("$source\@selftest,test");
     print OUTPUT "\n";
@@ -148,7 +202,16 @@ END
 }
 
 $name = shift (@ARGV);
-while ($name) {
-    generate_manpage ($name);
-    $name = shift (@ARGV);
+$outp = shift (@ARGV);
+if (!$outp) {
+    $outp=$name;
 }
+$rootsrcdir = shift (@ARGV);
+if (!$rootsrcdir) {
+    $rootsrcdir="..";
+}
+
+if ($ENV{"V"} == "1") {
+    printf "D: got name='$name' outp='$outp' rootsrcdir='$rootsrcdir' from the start\n";
+}
+generate_manpage ($name, $outp, $rootsrcdir);
