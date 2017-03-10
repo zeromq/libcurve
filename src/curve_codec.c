@@ -496,7 +496,7 @@ s_produce_hello (curve_codec_t *self)
                signature, 64,
                "CurveZMQHELLO---",
                self->peer_permakey,     //  Server public key
-               zcert_secret_key (self->transcert));
+               (byte *)zcert_secret_key (self->transcert));
 
     return command;
 }
@@ -513,7 +513,7 @@ s_process_hello (curve_codec_t *self, zframe_t *input)
         signature_received, 64,
         "CurveZMQHELLO---",
         hello->client,
-        zcert_secret_key (self->permacert));
+        (byte *)zcert_secret_key (self->permacert));
 
     return rc;
 }
@@ -562,7 +562,7 @@ s_produce_welcome (curve_codec_t *self)
                plain, 128,
                "WELCOME-",
                self->peer_transkey,
-               zcert_secret_key (self->permacert));
+               (byte *)zcert_secret_key (self->permacert));
 
     return command;
 }
@@ -579,7 +579,7 @@ s_process_welcome (curve_codec_t *self, zframe_t *input)
         plain, 128,
         "WELCOME-",
         self->peer_permakey,    //  Server public key
-        zcert_secret_key (self->transcert));
+        (byte *)zcert_secret_key (self->transcert));
 
     if (rc == 0) {
         memcpy (self->peer_transkey, plain, 32);
@@ -618,7 +618,7 @@ s_produce_initiate (curve_codec_t *self)
                vouch_plain, 64,
                "VOUCH---",
                self->peer_transkey,
-               zcert_secret_key (self->permacert));
+               (byte *)zcert_secret_key (self->permacert));
 
     //  Working variables for crypto calls
     size_t box_size = 128 + self->metadata_size;
@@ -697,7 +697,7 @@ s_process_initiate (curve_codec_t *self, zframe_t *input)
             plain, 64,
             "VOUCH---",
             self->peer_permakey,
-            zcert_secret_key (self->transcert));
+            (byte *)zcert_secret_key (self->transcert));
 
         //  Check vouch is short term client public key plus our public key
         if (rc == 0 

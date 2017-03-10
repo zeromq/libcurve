@@ -518,7 +518,7 @@ curve_client_test (bool verbose)
     curve_client_set_metadata (client, "Client", "CURVEZMQ/curve_client");
     curve_client_set_metadata (client, "Identity", "E475DA11");
     curve_client_set_verbose (client, verbose);
-    curve_client_connect (client, "tcp://127.0.0.1:9005", zcert_public_key (server_cert));
+    curve_client_connect (client, "tcp://127.0.0.1:9005", (byte *)zcert_public_key (server_cert));
 
     curve_client_sendstr (client, "Hello, World");
     char *reply = curve_client_recvstr (client);
