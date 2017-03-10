@@ -608,7 +608,7 @@ client_task (void *args)
 
     zcert_t *server_cert = zcert_load (TESTDIR "/server.cert");
     assert (server_cert);
-    curve_client_connect (client, "tcp://127.0.0.1:9006", zcert_public_key (server_cert));
+    curve_client_connect (client, "tcp://127.0.0.1:9006", (byte *)zcert_public_key (server_cert));
     zcert_destroy (&server_cert);
 
     curve_client_sendstr (client, "Hello, World");
