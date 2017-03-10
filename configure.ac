@@ -207,7 +207,7 @@ AS_IF([test x"${search_libczmq}" = xyes], [
 
     found_pkgconfig=""
     found_linkname=""
-    PKG_CHECK_MODULES([czmq], [libczmq >= 0.0.0 libczmq < 4],
+    PKG_CHECK_MODULES([czmq], [libczmq < 4],
     [
         PKGCFG_LIBS_PRIVATE="$PKGCFG_LIBS_PRIVATE $czmq_LIBS"
         was_czmq_check_lib_detected=pkgcfg
@@ -259,7 +259,7 @@ dnl END of PKG_CHECK_MODULES and/or direct tests for libczmq
             ],
         [xno], [
                 AC_SUBST([pkgconfig_name_libczmq],[libczmq])
-            AC_MSG_ERROR([Cannot find pkg-config metadata for libczmq >= 0.0.0 and < 4])
+            AC_MSG_ERROR([Cannot find pkg-config metadata for libczmq < 4])
     ])
 ])
 dnl END of enabled attempts to search for libczmq

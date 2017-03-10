@@ -12,8 +12,7 @@ Name: libcurve
 Description: reference implementation for CurveZMQ
 Version: @VERSION@
 
-Requires:@pkgconfig_name_libzmq@ @pkgconfig_name_libczmq@ >= 0.0.0
- libczmq < 4 @pkgconfig_name_libsodium@
+Requires:@pkgconfig_name_libzmq@ @pkgconfig_name_libczmq@ < 4 @pkgconfig_name_libsodium@
 
 Libs: -L${libdir} -lcurve
 Cflags: -I${includedir} @pkg_config_defines@
