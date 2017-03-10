@@ -10,7 +10,7 @@ before_script:
 - cd libsodium
 - git checkout stable
 - ./autogen.sh
-- ./configure && make check
+- ./configure && make
 - sudo make install
 - sudo ldconfig
 - cd ..
@@ -19,7 +19,7 @@ before_script:
 - git clone git://github.com/zeromq/libzmq.git
 - cd libzmq
 - ./autogen.sh
-- ./configure --with-libsodium && make check
+- ./configure --with-libsodium && make
 - sudo make install
 - sudo ldconfig
 - cd ..
@@ -29,7 +29,7 @@ before_script:
 - cd czmq
 - git checkout v3.0.2
 - ./autogen.sh
-- ./configure && make check
+- ./configure && make
 - sudo make install
 - sudo ldconfig
 - cd ..
